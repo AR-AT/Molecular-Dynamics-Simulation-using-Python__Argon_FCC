@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from scipy.ndimage import gaussian_filter1d
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 import time
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -54,31 +54,46 @@ def compute_forces(positions, box_length):
                 potential_energy += potential
     return forces, potential_energy
 
-# Velocity-Verlet integration
-def velocity_verlet(positions, velocities, forces, dt, box_length):
+# Velocity-Verlet integration with adaptive time step
+def velocity_verlet_adaptive(positions, velocities, forces, dt, box_length, max_force_threshold=1e-10):
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / mass
     new_positions = apply_pbc(new_positions, box_length)
     new_forces, _ = compute_forces(new_positions, box_length)
+    max_force = np.max(np.linalg.norm(new_forces, axis=1))
+    
+    if max_force > max_force_threshold:
+        dt = 0.9 * dt * (max_force_threshold / max_force)**0.5
+    
     new_velocities = velocities + 0.5 * (forces + new_forces) * dt / mass
-    return new_positions, new_velocities, new_forces
+    return new_positions, new_velocities, new_forces, dt
 
-# Standard Verlet integration
-def standard_verlet(positions, velocities, forces, dt, box_length):
+# Standard Verlet integration with adaptive time step
+def standard_verlet_adaptive(positions, velocities, forces, dt, box_length, max_force_threshold=1e-10):
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / mass
     new_positions = apply_pbc(new_positions, box_length)
     new_forces, _ = compute_forces(new_positions, box_length)
-    new_velocities = velocities + new_forces * dt / mass
-    return new_positions, new_velocities, new_forces
+    max_force = np.max(np.linalg.norm(new_forces, axis=1))
 
-# Leapfrog Verlet integration
-def leapfrog_verlet(positions, velocities, forces, dt, box_length):
+    if max_force > max_force_threshold:
+        dt = 0.9 * dt * (max_force_threshold / max_force)**0.5
+
+    new_velocities = velocities + new_forces * dt / mass
+    return new_positions, new_velocities, new_forces, dt
+
+# Leapfrog Verlet integration with adaptive time step
+def leapfrog_verlet_adaptive(positions, velocities, forces, dt, box_length, max_force_threshold=1e-10):
     half_dt = 0.5 * dt
     velocities_half = velocities + forces * half_dt / mass
     new_positions = positions + velocities_half * dt
     new_positions = apply_pbc(new_positions, box_length)
     new_forces, _ = compute_forces(new_positions, box_length)
+    max_force = np.max(np.linalg.norm(new_forces, axis=1))
+
+    if max_force > max_force_threshold:
+        dt = 0.9 * dt * (max_force_threshold / max_force)**0.5
+
     new_velocities = velocities_half + new_forces * half_dt / mass
-    return new_positions, new_velocities, new_forces
+    return new_positions, new_velocities, new_forces, dt
 
 # Function to run MD for a single temperature using the specified Verlet algorithm
 def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=20000):
@@ -100,7 +115,7 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=20000):
     # Equilibrate the system
     equilibration_steps = int(1.5 * sampling_steps)  # 10% of sampling steps
     for _ in range(equilibration_steps):
-        positions, velocities, forces = verlet_algorithm(positions, velocities, forces, dt, box_length)
+        positions, velocities, forces, dt = verlet_algorithm(positions, velocities, forces, dt, box_length)
 
     # Calculate the average potential energy and energy drift
     potential_energy = 0.0
@@ -109,7 +124,7 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=20000):
     total_energy_drift = 0.0
 
     for step in range(sampling_steps):
-        positions, velocities, forces = verlet_algorithm(positions, velocities, forces, dt, box_length)
+        positions, velocities, forces, dt = verlet_algorithm(positions, velocities, forces, dt, box_length)
         kinetic_energy = 0.5 * mass * np.sum(velocities**2)
         _, potential_energy_step = compute_forces(positions, box_length)
         total_energy = kinetic_energy + potential_energy_step
@@ -156,7 +171,7 @@ def generate_pdf_report(filename, melting_point, boiling_point, a_opt, temperatu
     c.drawString(50, height - 130, f"Total Runtime: {runtime:.2f} seconds")
     c.drawString(50, height - 150, f"Best Verlet Algorithm: {best_algorithm_name}")
     c.drawString(50, height - 170, f"Best Time Step: {best_time_step:.2e} s")
-    
+
     # Wrap the reason text to avoid overflowing off the page
     reason_text = f"Reason: {reason}"
     max_chars_per_line = 78
@@ -181,7 +196,7 @@ def generate_pdf_report(filename, melting_point, boiling_point, a_opt, temperatu
 
     # Add the plot image to the PDF
     c.drawImage(plot_filename, 50, 200, width=500, height=300)
-    
+
     c.save()
 
 # Main script
@@ -193,12 +208,12 @@ if __name__ == "__main__":
 
     # Define parameters for time step testing
     temperatures = np.arange(5, 205, 5)
-    time_steps = [1e-15, 2e-15, 5e-15, 5e-16]  # Different time steps to test
+    time_steps = [1e-15, 1e-14, 5e-15, 5e-16]  # Different time steps to test
     seeds = np.random.randint(0, 10000, len(temperatures))  # Different seeds for each temperature
 
-    # Define Verlet algorithms
-    verlet_algorithms = [velocity_verlet, standard_verlet, leapfrog_verlet]
-    algorithm_names = ["Velocity-Verlet", "Standard Verlet", "Leapfrog Verlet"]
+    # Define Verlet algorithms with adaptive time step
+    verlet_algorithms = [velocity_verlet_adaptive, standard_verlet_adaptive, leapfrog_verlet_adaptive]
+    algorithm_names = ["Velocity-Verlet (Adaptive)", "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
 
     # Run a short preliminary simulation to select the best Verlet algorithm and time step
     preliminary_steps = 500
@@ -237,9 +252,9 @@ if __name__ == "__main__":
     # Run the MD simulation in parallel using the best Verlet algorithm and best time step
     with Pool(16) as pool:
         results = pool.starmap(run_md_for_temperature, [(T, seed, best_verlet_algorithm, best_time_step, sampling_steps) for T, seed in zip(temperatures, seeds)])
-    
+
     dts, potential_energies, energy_drifts = zip(*results)
-    
+
     end_time = time.time()  # End time measurement
     runtime = end_time - start_time
     print(f"Runtime: {runtime:.2f} seconds")
