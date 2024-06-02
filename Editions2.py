@@ -159,6 +159,14 @@ def test_time_steps(T, seed, verlet_algorithm, time_steps, sampling_steps=20000)
         results = pool.starmap(run_md_for_temperature, args)
     return results
 
+# Function to find the best sampling steps
+def find_best_sampling_steps(T, seed, verlet_algorithm, time_step, sampling_step_range):
+    results = []
+    for sampling_steps in sampling_step_range:
+        dt, potential_energy, energy_drift = run_md_for_temperature(T, seed, verlet_algorithm, time_step, sampling_steps)
+        results.append((sampling_steps, potential_energy, energy_drift))
+    return results
+
 # Generate PDF report
 def generate_pdf_report(filename, melting_point, boiling_point, a_opt, temperatures, potential_energies, runtime, best_algorithm_name, best_time_step, reason):
     c = canvas.Canvas(filename, pagesize=letter)
@@ -208,7 +216,7 @@ if __name__ == "__main__":
 
     # Define parameters for time step testing
     temperatures = np.arange(5, 205, 5)
-    time_steps = [1e-15, 1e-14, 5e-15, 5e-16]  # Different time steps to test
+    time_steps = [1e-15, 2e-15, 5e-15, 5e-16]  # Different time steps to test
     seeds = np.random.randint(0, 10000, len(temperatures))  # Different seeds for each temperature
 
     # Define Verlet algorithms with adaptive time step
@@ -246,12 +254,20 @@ if __name__ == "__main__":
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    # Set sampling steps
-    sampling_steps = 20000
+    # Find the best sampling steps
+    sampling_step_range = [5000, 10000, 20000, 50000]
+    sampling_results = find_best_sampling_steps(temperatures[0], seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
+
+    for sampling_steps, potential_energy, energy_drift in sampling_results:
+        print(f"Sampling steps: {sampling_steps}, Potential energy: {potential_energy:.2e} J, Energy drift: {energy_drift:.2e} J")
+
+    # Choose the best sampling steps based on the smallest energy drift
+    best_sampling_steps = min(sampling_results, key=lambda x: x[2])[0]
+    print(f"Best sampling steps: {best_sampling_steps}")
 
     # Run the MD simulation in parallel using the best Verlet algorithm and best time step
     with Pool(16) as pool:
-        results = pool.starmap(run_md_for_temperature, [(T, seed, best_verlet_algorithm, best_time_step, sampling_steps) for T, seed in zip(temperatures, seeds)])
+        results = pool.starmap(run_md_for_temperature, [(T, seed, best_verlet_algorithm, best_time_step, best_sampling_steps) for T, seed in zip(temperatures, seeds)])
 
     dts, potential_energies, energy_drifts = zip(*results)
 
