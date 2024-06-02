@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
-from multiprocessing import Pool
+from scipy.ndimage import gaussian_filter1d
+from multiprocessing import Pool, cpu_count
 import time
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -97,7 +98,7 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=20000):
     velocities *= scale_factor
 
     # Equilibrate the system
-    equilibration_steps = int(0.1 * sampling_steps)  # 10% of sampling steps
+    equilibration_steps = int(1.5 * sampling_steps)  # 10% of sampling steps
     for _ in range(equilibration_steps):
         positions, velocities, forces = verlet_algorithm(positions, velocities, forces, dt, box_length)
 
@@ -121,27 +122,26 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=20000):
     potential_energy /= count
     energy_drift = total_energy_drift / count
 
-    return potential_energy, energy_drift
+    return dt, potential_energy, energy_drift
 
 # Function to optimize lattice parameter
-def optimize_lattice_parameter():
-    def potential_energy_for_lattice(a):
-        positions = create_fcc_lattice(a, 3)
-        box_length = 3 * a
-        _, potential_energy = compute_forces(positions, box_length)
-        return potential_energy
+def potential_energy_for_lattice(a):
+    positions = create_fcc_lattice(a, 3)
+    box_length = 3 * a
+    _, potential_energy = compute_forces(positions, box_length)
+    return potential_energy
 
+def optimize_lattice_parameter():
     initial_guesses = np.linspace(4.0e-10, 6.5e-10, 50)
-    results = [minimize(potential_energy_for_lattice, guess, bounds=[(4.0e-10, 6.5e-10)]) for guess in initial_guesses]
+    results = [minimize(potential_energy_for_lattice, [guess], bounds=[(4.0e-10, 6.5e-10)]) for guess in initial_guesses]
     best_result = min(results, key=lambda x: x.fun)
     return best_result.x[0]
 
 # Function to test different time steps
 def test_time_steps(T, seed, verlet_algorithm, time_steps, sampling_steps=20000):
-    results = []
-    for dt in time_steps:
-        potential_energy, energy_drift = run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps)
-        results.append((dt, potential_energy, energy_drift))
+    with Pool(16) as pool:
+        args = [(T, seed, verlet_algorithm, dt, sampling_steps) for dt in time_steps]
+        results = pool.starmap(run_md_for_temperature, args)
     return results
 
 # Generate PDF report
@@ -159,7 +159,7 @@ def generate_pdf_report(filename, melting_point, boiling_point, a_opt, temperatu
     
     # Wrap the reason text to avoid overflowing off the page
     reason_text = f"Reason: {reason}"
-    max_chars_per_line = 80
+    max_chars_per_line = 78
     wrapped_reason = "\n".join([reason_text[i:i+max_chars_per_line] for i in range(0, len(reason_text), max_chars_per_line)])
     text_lines = wrapped_reason.split('\n')
     for i, line in enumerate(text_lines):
@@ -180,7 +180,7 @@ def generate_pdf_report(filename, melting_point, boiling_point, a_opt, temperatu
     plt.close()
 
     # Add the plot image to the PDF
-    c.drawImage(plot_filename, 50, height - 500, width=500, height=300)
+    c.drawImage(plot_filename, 50, 200, width=500, height=300)
     
     c.save()
 
@@ -193,7 +193,7 @@ if __name__ == "__main__":
 
     # Define parameters for time step testing
     temperatures = np.arange(5, 205, 5)
-    time_steps = [1e-15, 2e-15, 5e-15, 1e-14]  # Different time steps to test
+    time_steps = [1e-15, 2e-15, 5e-15, 5e-16]  # Different time steps to test
     seeds = np.random.randint(0, 10000, len(temperatures))  # Different seeds for each temperature
 
     # Define Verlet algorithms
@@ -235,28 +235,34 @@ if __name__ == "__main__":
     sampling_steps = 20000
 
     # Run the MD simulation in parallel using the best Verlet algorithm and best time step
-    with Pool(6) as pool:
+    with Pool(16) as pool:
         results = pool.starmap(run_md_for_temperature, [(T, seed, best_verlet_algorithm, best_time_step, sampling_steps) for T, seed in zip(temperatures, seeds)])
     
-    potential_energies, energy_drifts = zip(*results)
+    dts, potential_energies, energy_drifts = zip(*results)
     
     end_time = time.time()  # End time measurement
     runtime = end_time - start_time
     print(f"Runtime: {runtime:.2f} seconds")
 
+    # Smooth the potential energy data
+    smoothed_potential_energies = gaussian_filter1d(potential_energies, sigma=2)
+
+    # Calculate first and second derivatives
+    first_derivative = np.gradient(smoothed_potential_energies, temperatures)
+    second_derivative = np.gradient(first_derivative, temperatures)
+
     # Plotting the average potential energy as a function of temperature
     plt.figure(figsize=(10, 6))
-    plt.plot(temperatures, potential_energies, marker='o', linestyle='-', label='Average Potential Energy (MD Simulation)')
+    plt.plot(temperatures, smoothed_potential_energies, marker='o', linestyle='-', label='Smoothed Potential Energy (MD Simulation)')
     plt.xlabel('Temperature (K)')
-    plt.ylabel('Average Potential Energy (J)')
-    plt.title('Average Potential Energy vs Temperature for Argon')
+    plt.ylabel('Smoothed Potential Energy (J)')
+    plt.title('Smoothed Potential Energy vs Temperature for Argon')
     plt.legend()
     plt.grid(True)
 
     # Find melting and boiling points
-    diff_potential_energies = np.diff(potential_energies)
-    melting_point = temperatures[np.argmax(diff_potential_energies[:len(diff_potential_energies)//2])]
-    boiling_point = temperatures[np.argmax(diff_potential_energies[len(diff_potential_energies)//2:]) + len(diff_potential_energies)//2]
+    melting_point = temperatures[np.argmax(first_derivative)]
+    boiling_point = temperatures[np.argmax(second_derivative)]
 
     plt.axvline(melting_point, color='r', linestyle='--', label=f'Melting Point: {melting_point} K')
     plt.axvline(boiling_point, color='g', linestyle='--', label=f'Boiling Point: {boiling_point} K')
@@ -264,4 +270,4 @@ if __name__ == "__main__":
     plt.show()
 
     # Generate PDF report
-    generate_pdf_report("MD_Simulation_Report.pdf", melting_point, boiling_point, a_opt, temperatures, potential_energies, runtime, best_algorithm_name, best_time_step, reason)
+    generate_pdf_report("MD_Simulation_Report.pdf", melting_point, boiling_point, a_opt, temperatures, smoothed_potential_energies, runtime, best_algorithm_name, best_time_step, reason)
