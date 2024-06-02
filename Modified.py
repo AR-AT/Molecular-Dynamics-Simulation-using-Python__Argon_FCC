@@ -75,7 +75,8 @@ def compute_forces(positions, box_length):
     return forces, potential_energy
 
 @njit
-def velocity_verlet_adaptive(positions, velocities, forces, dt, box_length, max_force_threshold=1e-10):
+def velocity_verlet_adaptive(positions,
+            velocities, forces, dt, box_length, max_force_threshold=1e-21):
     """Velocity-Verlet integration with adaptive time step."""
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
@@ -83,13 +84,15 @@ def velocity_verlet_adaptive(positions, velocities, forces, dt, box_length, max_
     max_force = np.max(custom_norm(new_forces, axis=1))
     
     if max_force > max_force_threshold:
-        dt = 0.9 * dt * (max_force_threshold / max_force)**0.5
+        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-16)
     
     new_velocities = velocities + 0.5 * (forces + new_forces) * dt / MASS
     return new_positions, new_velocities, new_forces, dt
 
+
 @njit
-def standard_verlet_adaptive(positions, velocities, forces, dt, box_length, max_force_threshold=1e-10):
+def standard_verlet_adaptive(positions,
+    velocities, forces, dt, box_length, max_force_threshold=1e-21):
     """Standard Verlet integration with adaptive time step."""
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
@@ -97,13 +100,15 @@ def standard_verlet_adaptive(positions, velocities, forces, dt, box_length, max_
     max_force = np.max(custom_norm(new_forces, axis=1))
 
     if max_force > max_force_threshold:
-        dt = 0.9 * dt * (max_force_threshold / max_force)**0.5
+        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-16)
 
     new_velocities = velocities + new_forces * dt / MASS
     return new_positions, new_velocities, new_forces, dt
 
+
 @njit
-def leapfrog_verlet_adaptive(positions, velocities, forces, dt, box_length, max_force_threshold=1e-10):
+def leapfrog_verlet_adaptive(positions,
+    velocities, forces, dt, box_length, max_force_threshold=1e-21):
     """Leapfrog Verlet integration with adaptive time step."""
     half_dt = 0.5 * dt
     velocities_half = velocities + forces * half_dt / MASS
@@ -113,18 +118,23 @@ def leapfrog_verlet_adaptive(positions, velocities, forces, dt, box_length, max_
     max_force = np.max(custom_norm(new_forces, axis=1))
 
     if max_force > max_force_threshold:
-        dt = 0.9 * dt * (max_force_threshold / max_force)**0.5
+        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-16)
 
     new_velocities = velocities_half + new_forces * half_dt / MASS
     return new_positions, new_velocities, new_forces, dt
 
-def adaptive_equilibration(positions, velocities, forces, dt, box_length, verlet_algorithm, equilibration_window=100, threshold=1e-5):
+
+def adaptive_equilibration(positions, velocities,
+                           forces, dt, box_length,
+                           verlet_algorithm,
+                           equilibration_window=100, threshold=1e-20):
     """Perform adaptive equilibration."""
     equilibration_steps = 0
     recent_potential_energies = []
     with tqdm(total=equilibration_window, desc="Equilibration") as pbar:
         while True:
-            positions, velocities, forces, dt = verlet_algorithm(positions, velocities, forces, dt, box_length)
+            positions, velocities, forces, dt = verlet_algorithm(positions,
+                velocities, forces, dt, box_length)
             _, potential_energy = compute_forces(positions, box_length)
             recent_potential_energies.append(potential_energy)
             if len(recent_potential_energies) > equilibration_window:
@@ -153,7 +163,8 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=20000):
     velocities *= scale_factor
 
     # Adaptive equilibration
-    positions, velocities, forces, dt, equilibration_steps = adaptive_equilibration(positions, velocities, forces, dt, box_length, verlet_algorithm)
+    positions, velocities, forces, dt, equilibration_steps = adaptive_equilibration(positions,
+                                velocities, forces, dt, box_length, verlet_algorithm)
     print(f"Equilibration steps: {equilibration_steps}")
 
     potential_energy = 0.0
@@ -163,7 +174,8 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=20000):
 
     with tqdm(total=sampling_steps, desc="MD Simulation") as pbar:
         for step in range(sampling_steps):
-            positions, velocities, forces, dt = verlet_algorithm(positions, velocities, forces, dt, box_length)
+            positions, velocities, forces, dt = verlet_algorithm(positions,
+                                    velocities, forces, dt, box_length)
             kinetic_energy = 0.5 * MASS * np.sum(velocities**2)
             _, potential_energy_step = compute_forces(positions, box_length)
             total_energy = kinetic_energy + potential_energy_step
@@ -189,32 +201,41 @@ def potential_energy_for_lattice(a):
 def optimize_lattice_parameter():
     """Optimize the lattice parameter."""
     initial_guesses = np.linspace(4.0e-10, 6.5e-10, 50)
-    results = [minimize(potential_energy_for_lattice, [guess], bounds=[(4.0e-10, 6.5e-10)]) for guess in initial_guesses]
+    results = [minimize(potential_energy_for_lattice,
+                        [guess], bounds=[(4.0e-10, 6.5e-10)]) for
+               guess in initial_guesses]
     best_result = min(results, key=lambda x: x.fun)
     return best_result.x[0]
 
-def test_time_steps(T, seed, verlet_algorithm, time_steps, sampling_steps=20000):
+def test_time_steps(T, seed, verlet_algorithm,
+                    time_steps, sampling_steps=20000):
     """Test different time steps."""
-    with Pool(16) as pool:
-        args = [(T, seed, verlet_algorithm, dt, sampling_steps) for dt in time_steps]
+    with Pool(4) as pool:
+        args = [(T, seed, verlet_algorithm,
+                 dt, sampling_steps) for dt in time_steps]
         results = pool.starmap(run_md_for_temperature, args)
     return results
 
-def find_best_sampling_steps(T, seed, verlet_algorithm, time_step, sampling_step_range):
+def find_best_sampling_steps(T, seed, verlet_algorithm,
+                time_step, sampling_step_range):
     """Find the best sampling steps."""
     results = []
     for sampling_steps in sampling_step_range:
-        dt, potential_energy, energy_drift = run_md_for_temperature(T, seed, verlet_algorithm, time_step, sampling_steps)
+        dt, potential_energy, energy_drift = run_md_for_temperature(T, seed,
+                            verlet_algorithm, time_step, sampling_steps)
         results.append((sampling_steps, potential_energy, energy_drift))
     return results
 
-def generate_pdf_report(filename, melting_point, boiling_point, a_opt, temperatures, potential_energies, runtime, best_algorithm_name, best_time_step, reason):
+def generate_pdf_report(filename,
+                        melting_point, boiling_point, a_opt,
+                        temperatures, potential_energies, runtime,
+                        best_algorithm_name, best_time_step, reason):
     """Generate a PDF report."""
     c = canvas.Canvas(filename, pagesize=letter)
     width, height = letter
 
     c.drawString(50, height - 50, "Molecular Dynamics Simulation Report")
-    c.drawString(50, height - 70, f"Optimized Lattice Parameter: {a_opt:.2e} m")
+    c.drawString(50, height - 70, f"Optimized Lattice Parameter: {a_opt:.4e} m")
     c.drawString(50, height - 90, f"Melting Point: {melting_point} K")
     c.drawString(50, height - 110, f"Boiling Point: {boiling_point} K")
     c.drawString(50, height - 130, f"Total Runtime: {runtime:.2f} seconds")
@@ -223,19 +244,23 @@ def generate_pdf_report(filename, melting_point, boiling_point, a_opt, temperatu
 
     reason_text = f"Reason: {reason}"
     max_chars_per_line = 78
-    wrapped_reason = "\n".join([reason_text[i:i+max_chars_per_line] for i in range(0, len(reason_text), max_chars_per_line)])
+    wrapped_reason = "\n".join([reason_text[i:i+max_chars_per_line] for i in range(0,
+                            len(reason_text), max_chars_per_line)])
     text_lines = wrapped_reason.split('\n')
     for i, line in enumerate(text_lines):
         c.drawString(50, height - 190 - i*20, line)
 
     plot_filename = "temp_plot.png"
     plt.figure(figsize=(10, 6))
-    plt.plot(temperatures, potential_energies, marker='o', linestyle='-', label='Average Potential Energy (MD Simulation)')
+    plt.plot(temperatures, potential_energies,
+    marker='o', linestyle='-', label='Average Potential Energy (MD Simulation)')
     plt.xlabel('Temperature (K)')
     plt.ylabel('Average Potential Energy (J)')
     plt.title('Average Potential Energy vs Temperature for Argon')
-    plt.axvline(melting_point, color='r', linestyle='--', label=f'Melting Point: {melting_point} K')
-    plt.axvline(boiling_point, color='g', linestyle='--', label=f'Boiling Point: {boiling_point} K')
+    plt.axvline(melting_point, color='r', linestyle='--',
+        label=f'Melting Point: {melting_point} K')
+    plt.axvline(boiling_point, color='g', linestyle='--',
+        label=f'Boiling Point: {boiling_point} K')
     plt.legend()
     plt.grid(True)
     plt.savefig(plot_filename)
@@ -255,10 +280,12 @@ def main():
     time_steps = [1e-15, 2e-15, 5e-15, 5e-16]  # Different time steps to test
     seeds = np.random.randint(0, 10000, len(temperatures))
 
-    verlet_algorithms = [velocity_verlet_adaptive, standard_verlet_adaptive, leapfrog_verlet_adaptive]
-    algorithm_names = ["Velocity-Verlet (Adaptive)", "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
+    verlet_algorithms = [velocity_verlet_adaptive,
+                         standard_verlet_adaptive, leapfrog_verlet_adaptive]
+    algorithm_names = ["Velocity-Verlet (Adaptive)",
+                "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
 
-    preliminary_steps = 10
+    preliminary_steps = 500
     potential_energies_per_algorithm = []
     energy_drifts_per_algorithm = []
     best_time_steps = []
@@ -276,7 +303,8 @@ def main():
         potential_energies_per_algorithm.append(np.mean(potential_energies))
         energy_drifts_per_algorithm.append(np.mean(energy_drifts))
 
-    best_algorithm_index = np.argmin([pe + ed for pe, ed in zip(potential_energies_per_algorithm, energy_drifts_per_algorithm)])
+    best_algorithm_index = np.argmin([pe + ed for pe, ed in zip(potential_energies_per_algorithm,
+                                                    energy_drifts_per_algorithm)])
     best_verlet_algorithm = verlet_algorithms[best_algorithm_index]
     best_algorithm_name = algorithm_names[best_algorithm_index]
     best_time_step = best_time_steps[best_algorithm_index]
@@ -286,8 +314,9 @@ def main():
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    sampling_step_range = [20]
-    sampling_results = find_best_sampling_steps(temperatures[0], seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
+    sampling_step_range = [15000, 20000, 25000]
+    sampling_results = find_best_sampling_steps(temperatures[0],
+                seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
 
     for sampling_steps, potential_energy, energy_drift in sampling_results:
         print(f"Sampling steps: {sampling_steps}, Potential energy: {potential_energy:.2e} J, Energy drift: {energy_drift:.2e} J")
@@ -295,7 +324,7 @@ def main():
     best_sampling_steps = min(sampling_results, key=lambda x: x[2])[0]
     print(f"Best sampling steps: {best_sampling_steps}")
 
-    with Pool(16) as pool:
+    with Pool(4) as pool:
         results = pool.starmap(run_md_for_temperature,
                                [(T, seed, best_verlet_algorithm,
                                  best_time_step, best_sampling_steps)
