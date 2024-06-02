@@ -9,11 +9,11 @@ from reportlab.pdfgen import canvas
 from tqdm import tqdm
 from numba import njit, prange
 
-# Constants for argon
-EPSILON = 1.65e-21  # Depth of the potential well in Joules
-SIGMA = 3.4e-10  # Distance at which the potential is zero in meters
-MASS = 6.63e-26  # Mass of argon atom in kg
-K_B = 1.38e-23  # Boltzmann constant in J/K
+
+EPSILON = 1.65e-21  
+SIGMA = 3.4e-10  
+MASS = 6.63e-26  
+K_B = 1.38e-23 
 
 def create_fcc_lattice(a, n):
     """Create an FCC lattice."""
@@ -76,7 +76,7 @@ def compute_forces(positions, box_length):
 
 @njit
 def velocity_verlet_adaptive(positions,
-            velocities, forces, dt, box_length, max_force_threshold=1e-10):
+            velocities, forces, dt, box_length, max_force_threshold=5e-11):
     """Velocity-Verlet integration with adaptive time step."""
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
@@ -92,7 +92,7 @@ def velocity_verlet_adaptive(positions,
 
 @njit
 def standard_verlet_adaptive(positions,
-    velocities, forces, dt, box_length, max_force_threshold=1e-10):
+    velocities, forces, dt, box_length, max_force_threshold=5e-11):
     """Standard Verlet integration with adaptive time step."""
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
@@ -108,7 +108,7 @@ def standard_verlet_adaptive(positions,
 
 @njit
 def leapfrog_verlet_adaptive(positions,
-    velocities, forces, dt, box_length, max_force_threshold=1e-10):
+    velocities, forces, dt, box_length, max_force_threshold=5e-11):
     """Leapfrog Verlet integration with adaptive time step."""
     half_dt = 0.5 * dt
     velocities_half = velocities + forces * half_dt / MASS
@@ -127,7 +127,7 @@ def leapfrog_verlet_adaptive(positions,
 def adaptive_equilibration(positions, velocities,
                            forces, dt, box_length,
                            verlet_algorithm,
-                           equilibration_window=150, threshold=1e-25):
+                           equilibration_window=200, threshold=5e-22):
     """Perform adaptive equilibration."""
     equilibration_steps = 0
     recent_potential_energies = []
@@ -145,6 +145,9 @@ def adaptive_equilibration(positions, velocities,
                     break
                 pbar.update(1)
             equilibration_steps += 1
+            
+            if equilibration_steps % 1000 == 0:
+                print(f"Step {equilibration_steps}, dt: {dt:.2e}, Potential Energy: {potential_energy:.5e}")
     return positions, velocities, forces, dt, equilibration_steps
 
 def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
@@ -173,10 +176,10 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
     )
     print(f"Equilibration steps: {equilibration_steps}")
 
-    potential_energy = 0.0
-    initial_total_energy = 0.0
+    potential_energy = 0
+    initial_total_energy = 0
     count = 0
-    total_energy_drift = 0.0
+    total_energy_drift = 0
 
     with tqdm(total=sampling_steps, desc="MD Simulation") as pbar:
         for step in range(sampling_steps):
@@ -286,7 +289,7 @@ def main():
     print(f"Optimized lattice parameter: {a_opt}")
 
     temperatures = np.arange(5, 205, 5)
-    time_steps = [1e-15, 1e-14, 5e-15, 5e-16]  # Different time steps to test
+    time_steps = [1e-15, 5e-16]  # Different time steps to test
     seeds = np.random.randint(0, 10000, len(temperatures))
 
     verlet_algorithms = [velocity_verlet_adaptive,
@@ -294,7 +297,7 @@ def main():
     algorithm_names = ["Velocity-Verlet (Adaptive)",
                 "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
 
-    preliminary_steps = 2000
+    preliminary_steps = 10000
     potential_energies_per_algorithm = []
     energy_drifts_per_algorithm = []
     best_time_steps = []
@@ -347,12 +350,9 @@ def main():
     runtime = end_time - start_time
     print(f"Runtime: {runtime:.2f} seconds")
 
-    smoothed_potential_energies = gaussian_filter1d(potential_energies,
-                                        sigma=2)
-    first_derivative = np.gradient(smoothed_potential_energies,
-                                   temperatures)
-    second_derivative = np.gradient(first_derivative,
-                                    temperatures)
+    smoothed_potential_energies = gaussian_filter1d(potential_energies, sigma=2)
+    first_derivative = np.gradient(smoothed_potential_energies, temperatures)
+    second_derivative = np.gradient(first_derivative, temperatures)
 
     plt.figure(figsize=(10, 6))
     plt.plot(temperatures, smoothed_potential_energies,
@@ -365,7 +365,10 @@ def main():
     plt.grid(True)
 
     melting_point = temperatures[np.argmax(first_derivative)]
-    boiling_point = temperatures[np.argmax(second_derivative)]
+    
+    post_melting_temperatures = temperatures[temperatures > melting_point]
+    post_melting_second_derivative = second_derivative[temperatures > melting_point]
+    boiling_point = post_melting_temperatures[np.argmax(post_melting_second_derivative)]
 
     plt.axvline(melting_point,
                 color='r', linestyle='--',
