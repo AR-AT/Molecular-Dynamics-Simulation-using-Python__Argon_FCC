@@ -15,18 +15,19 @@ SIGMA = 3.4e-10  # Distance at which the potential is zero in meters
 MASS = 6.63e-26  # Mass of argon atom in kg
 K_B = 1.38e-23  # Boltzmann constant in J/K
 
-@njit
 def create_fcc_lattice(a, n):
     """Create an FCC lattice."""
-    positions = []
     base = np.array([[0, 0, 0], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5]])
+    positions = np.zeros((n**3 * 4, 3))
+    index = 0
     for x in range(n):
         for y in range(n):
             for z in range(n):
                 offset = np.array([x, y, z])
                 for b in base:
-                    positions.append((offset + b) * a)
-    return np.array(positions)
+                    positions[index] = (offset + b) * a
+                    index += 1
+    return positions
 
 @njit
 def lennard_jones(r2):
@@ -41,6 +42,16 @@ def lennard_jones(r2):
 def apply_pbc(position, box_length):
     """Apply periodic boundary conditions."""
     return position - box_length * np.round(position / box_length)
+
+@njit
+def custom_norm(arr, axis=1):
+    """Compute the norm along a specified axis."""
+    if axis == 1:
+        return np.sqrt(np.sum(arr**2, axis=1))
+    elif axis == 0:
+        return np.sqrt(np.sum(arr**2, axis=0))
+    else:
+        raise ValueError("Invalid axis")
 
 @njit(parallel=True)
 def compute_forces(positions, box_length):
@@ -68,7 +79,7 @@ def velocity_verlet_adaptive(positions, velocities, forces, dt, box_length, max_
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
     new_forces, _ = compute_forces(new_positions, box_length)
-    max_force = np.max(np.linalg.norm(new_forces, axis=1))
+    max_force = np.max(custom_norm(new_forces, axis=1))
     
     if max_force > max_force_threshold:
         dt = 0.9 * dt * (max_force_threshold / max_force)**0.5
@@ -82,7 +93,7 @@ def standard_verlet_adaptive(positions, velocities, forces, dt, box_length, max_
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
     new_forces, _ = compute_forces(new_positions, box_length)
-    max_force = np.max(np.linalg.norm(new_forces, axis=1))
+    max_force = np.max(custom_norm(new_forces, axis=1))
 
     if max_force > max_force_threshold:
         dt = 0.9 * dt * (max_force_threshold / max_force)**0.5
@@ -98,7 +109,7 @@ def leapfrog_verlet_adaptive(positions, velocities, forces, dt, box_length, max_
     new_positions = positions + velocities_half * dt
     new_positions = apply_pbc(new_positions, box_length)
     new_forces, _ = compute_forces(new_positions, box_length)
-    max_force = np.max(np.linalg.norm(new_forces, axis=1))
+    max_force = np.max(custom_norm(new_forces, axis=1))
 
     if max_force > max_force_threshold:
         dt = 0.9 * dt * (max_force_threshold / max_force)**0.5
@@ -246,7 +257,7 @@ def main():
     verlet_algorithms = [velocity_verlet_adaptive, standard_verlet_adaptive, leapfrog_verlet_adaptive]
     algorithm_names = ["Velocity-Verlet (Adaptive)", "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
 
-    preliminary_steps = 500
+    preliminary_steps = 10
     potential_energies_per_algorithm = []
     energy_drifts_per_algorithm = []
     best_time_steps = []
@@ -274,7 +285,7 @@ def main():
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    sampling_step_range = [5000, 10000, 20000, 50000]
+    sampling_step_range = [20]
     sampling_results = find_best_sampling_steps(temperatures[0], seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
 
     for sampling_steps, potential_energy, energy_drift in sampling_results:
