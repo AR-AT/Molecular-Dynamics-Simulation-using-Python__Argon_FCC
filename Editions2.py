@@ -95,6 +95,22 @@ def leapfrog_verlet_adaptive(positions, velocities, forces, dt, box_length, max_
     new_velocities = velocities_half + new_forces * half_dt / mass
     return new_positions, new_velocities, new_forces, dt
 
+# Adaptive Equilibration
+def adaptive_equilibration(positions, velocities, forces, dt, box_length, verlet_algorithm, equilibration_window=100, threshold=1e-5):
+    equilibration_steps = 0
+    recent_potential_energies = []
+    while True:
+        positions, velocities, forces, dt = verlet_algorithm(positions, velocities, forces, dt, box_length)
+        _, potential_energy = compute_forces(positions, box_length)
+        recent_potential_energies.append(potential_energy)
+        if len(recent_potential_energies) > equilibration_window:
+            recent_potential_energies.pop(0)
+            mean_potential_energy = np.mean(recent_potential_energies)
+            if np.abs(potential_energy - mean_potential_energy) < threshold:
+                break
+        equilibration_steps += 1
+    return positions, velocities, forces, dt, equilibration_steps
+
 # Function to run MD for a single temperature using the specified Verlet algorithm
 def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=20000):
     np.random.seed(seed)
@@ -112,10 +128,9 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=20000):
     scale_factor = np.sqrt(T / current_temperature)
     velocities *= scale_factor
 
-    # Equilibrate the system
-    equilibration_steps = int(1.5 * sampling_steps)  # 10% of sampling steps
-    for _ in range(equilibration_steps):
-        positions, velocities, forces, dt = verlet_algorithm(positions, velocities, forces, dt, box_length)
+    # Adaptive equilibration
+    positions, velocities, forces, dt, equilibration_steps = adaptive_equilibration(positions, velocities, forces, dt, box_length, verlet_algorithm)
+    print(f"Equilibration steps: {equilibration_steps}")
 
     # Calculate the average potential energy and energy drift
     potential_energy = 0.0
