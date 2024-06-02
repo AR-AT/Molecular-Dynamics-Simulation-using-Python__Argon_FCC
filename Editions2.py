@@ -6,6 +6,7 @@ from multiprocessing import Pool
 import time
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from tqdm import tqdm  # Import tqdm for progress bars
 
 # Constants for argon
 epsilon = 1.65e-21  # Depth of the potential well in Joules
@@ -99,16 +100,18 @@ def leapfrog_verlet_adaptive(positions, velocities, forces, dt, box_length, max_
 def adaptive_equilibration(positions, velocities, forces, dt, box_length, verlet_algorithm, equilibration_window=100, threshold=1e-5):
     equilibration_steps = 0
     recent_potential_energies = []
-    while True:
-        positions, velocities, forces, dt = verlet_algorithm(positions, velocities, forces, dt, box_length)
-        _, potential_energy = compute_forces(positions, box_length)
-        recent_potential_energies.append(potential_energy)
-        if len(recent_potential_energies) > equilibration_window:
-            recent_potential_energies.pop(0)
-            mean_potential_energy = np.mean(recent_potential_energies)
-            if np.abs(potential_energy - mean_potential_energy) < threshold:
-                break
-        equilibration_steps += 1
+    with tqdm(total=equilibration_window, desc="Equilibration") as pbar:
+        while True:
+            positions, velocities, forces, dt = verlet_algorithm(positions, velocities, forces, dt, box_length)
+            _, potential_energy = compute_forces(positions, box_length)
+            recent_potential_energies.append(potential_energy)
+            if len(recent_potential_energies) > equilibration_window:
+                recent_potential_energies.pop(0)
+                mean_potential_energy = np.mean(recent_potential_energies)
+                if np.abs(potential_energy - mean_potential_energy) < threshold:
+                    break
+                pbar.update(1)
+            equilibration_steps += 1
     return positions, velocities, forces, dt, equilibration_steps
 
 # Function to run MD for a single temperature using the specified Verlet algorithm
@@ -138,16 +141,18 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=20000):
     count = 0
     total_energy_drift = 0.0
 
-    for step in range(sampling_steps):
-        positions, velocities, forces, dt = verlet_algorithm(positions, velocities, forces, dt, box_length)
-        kinetic_energy = 0.5 * mass * np.sum(velocities**2)
-        _, potential_energy_step = compute_forces(positions, box_length)
-        total_energy = kinetic_energy + potential_energy_step
-        potential_energy += potential_energy_step
-        if step == 0:
-            initial_total_energy = total_energy
-        total_energy_drift += abs(total_energy - initial_total_energy)
-        count += 1
+    with tqdm(total=sampling_steps, desc="MD Simulation") as pbar:
+        for step in range(sampling_steps):
+            positions, velocities, forces, dt = verlet_algorithm(positions, velocities, forces, dt, box_length)
+            kinetic_energy = 0.5 * mass * np.sum(velocities**2)
+            _, potential_energy_step = compute_forces(positions, box_length)
+            total_energy = kinetic_energy + potential_energy_step
+            potential_energy += potential_energy_step
+            if step == 0:
+                initial_total_energy = total_energy
+            total_energy_drift += abs(total_energy - initial_total_energy)
+            count += 1
+            pbar.update(1)
 
     potential_energy /= count
     energy_drift = total_energy_drift / count
