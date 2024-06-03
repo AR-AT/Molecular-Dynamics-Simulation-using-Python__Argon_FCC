@@ -30,12 +30,11 @@ def create_fcc_lattice(a, n):
 
 @njit
 def lennard_jones(r2):
-    
-    r2 = np.float64(r2)
+    """Calculate the Lennard-Jones potential and force."""
     r6 = (SIGMA ** 2 / r2) ** 3
     r12 = r6 ** 2
-    potential = np.float64(4 * EPSILON * (r12 - r6))
-    force = np.float64(24 * EPSILON * (2 * r12 - r6) / r2)
+    potential = 4 * EPSILON * (r12 - r6)
+    force = 24 * EPSILON * (2 * r12 - r6) / r2
     return potential, force
 
 @njit
@@ -83,27 +82,10 @@ def velocity_verlet_adaptive(positions,
     max_force = np.max(custom_norm(new_forces, axis=1))
     
     if max_force > max_force_threshold:
-        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-17)
+        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-16)
     
     new_velocities = velocities + 0.5 * (forces + new_forces) * dt / MASS
     return new_positions, new_velocities, new_forces, dt
-
-@njit
-def beeman_adaptive(positions, velocities, forces, previous_forces, dt, box_length, max_force_threshold=5e-11):
-    """Beeman's integration with adaptive time step."""
-    new_positions = positions + velocities * dt + (2/3) * forces * dt**2 / MASS - (1/6) * previous_forces * dt**2 / MASS
-    new_positions = apply_pbc(new_positions, box_length)
-    new_forces, _ = compute_forces(new_positions, box_length)
-    max_force = np.max(custom_norm(new_forces, axis=1))
-    
-    if max_force > max_force_threshold:
-        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-17)
-    
-    new_velocities = velocities + (1/3) * new_forces * dt / MASS + (5/6) * forces * dt / MASS - (1/6) * previous_forces * dt / MASS
-   
-    return new_positions, new_velocities, new_forces, dt
-
-
 
 @njit
 def standard_verlet_adaptive(positions,
@@ -115,7 +97,7 @@ def standard_verlet_adaptive(positions,
     max_force = np.max(custom_norm(new_forces, axis=1))
 
     if max_force > max_force_threshold:
-        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-17)
+        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-16)
 
     new_velocities = velocities + new_forces * dt / MASS
     return new_positions, new_velocities, new_forces, dt
@@ -132,7 +114,7 @@ def leapfrog_verlet_adaptive(positions,
     max_force = np.max(custom_norm(new_forces, axis=1))
 
     if max_force > max_force_threshold:
-        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-17)
+        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-16)
 
     new_velocities = velocities_half + new_forces * half_dt / MASS
     return new_positions, new_velocities, new_forces, dt
@@ -140,7 +122,7 @@ def leapfrog_verlet_adaptive(positions,
 def adaptive_equilibration(positions, velocities,
                            forces, dt, box_length,
                            verlet_algorithm,
-                           equilibration_window=1000, threshold=1e-23):
+                           equilibration_window=500, threshold=1e-22):
     """Perform adaptive equilibration."""
     equilibration_steps = 0
     recent_potential_energies = []
@@ -166,20 +148,22 @@ def adaptive_equilibration(positions, velocities,
 def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
     """Run MD simulation for a single temperature using the specified Verlet algorithm."""
     np.random.seed(seed)
-    a = 5.26e-10  
-    n = 3  
+    a = 5.26e-10  # Initial guess for the lattice parameter
+    n = 3  # Number of unit cells in each dimension
     positions = create_fcc_lattice(a, n)
-    box_length = n * a  
+    box_length = n * a  # Length of the simulation box
     N = len(positions)
     
+    # Initialize velocities for 5K
     velocities = np.random.randn(N, 3) * np.sqrt(K_B * 5 / MASS)
     forces, _ = compute_forces(positions, box_length)
-    previous_forces = forces.copy()  
 
+    # Rescale velocities to the desired temperature
     current_temperature = np.sum(MASS * np.sum(velocities**2, axis=1)) / (3 * N * K_B)
     scale_factor = np.sqrt(T / current_temperature)
     velocities *= scale_factor
 
+    # Adaptive equilibration
     positions, velocities, forces, dt, equilibration_steps = adaptive_equilibration(
         positions, velocities, forces, dt, box_length, verlet_algorithm
     )
@@ -197,17 +181,9 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
         initial_total_energy = None
     
         for step in range(sampling_steps):
-            if verlet_algorithm == beeman_adaptive:
-                positions, velocities, new_forces, dt = verlet_algorithm(
-                    positions, velocities, forces, previous_forces, dt, box_length
-                )
-                previous_forces = forces.copy()
-                forces = new_forces
-            else:
-                positions, velocities, forces, dt = verlet_algorithm(
-                    positions, velocities, forces, dt, box_length
-                )
-
+            positions, velocities, forces, dt = verlet_algorithm(
+                positions, velocities, forces, dt, box_length
+            )
             kinetic_energy = 0.5 * MASS * np.sum(velocities**2)
             _, potential_energy_step = compute_forces(positions, box_length)
             total_energy = kinetic_energy + potential_energy_step
@@ -225,7 +201,6 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
     
     return dt, average_potential_energy, energy_drift
 
-
 def potential_energy_for_lattice(a):
     """Calculate potential energy for a given lattice parameter."""
     positions = create_fcc_lattice(a, 3)
@@ -235,7 +210,7 @@ def potential_energy_for_lattice(a):
 
 def optimize_lattice_parameter():
     """Optimize the lattice parameter."""
-    initial_guesses = np.linspace(5e-10, 6e-10, 500)
+    initial_guesses = np.linspace(5e-10, 6e-10, 300)
     results = [minimize(potential_energy_for_lattice,
                         [guess], bounds=[(5e-10, 6e-10)]) for
                guess in initial_guesses]
@@ -325,50 +300,33 @@ def generate_pdf_report(filename,
         label=f'Boiling Point: {boiling_point} K')
     plt.legend()
     plt.grid(True)
-   # plt.savefig(plot_filename)
+    plt.savefig(plot_filename)
     plt.close()
 
     c.drawImage(plot_filename, 50, 200, width=500, height=300)
     c.save()
 
 
-
 def main():
     """Main function to run the MD simulation."""
-    start_time = time.time()  
+    start_time = time.time()  # Start time measurement
 
     a_opt = optimize_lattice_parameter()
     print(f"Optimized lattice parameter: {a_opt}")
 
-   
     temperatures = np.arange(5, 205, 5)
-    
-    
-    preliminary_temperatures = np.arange(90, 100, 5)  
-    
-    time_steps = [
-        1e-14
-                  # , 1e-15,5e-16, 5e-15
-                  ]
+    time_steps = [1e-14]
  
     seeds = np.random.randint(0, 10000, len(temperatures))
-    preliminary_seeds = np.random.randint(0, 10000, len(preliminary_temperatures))
 
-    verlet_algorithms = [
-        # velocity_verlet_adaptive,
-        #      standard_verlet_adaptive, leapfrog_verlet_adaptive,
-             beeman_adaptive]
-    algorithm_names = [
-        # "Velocity-Verlet (Adaptive)",
-        #                "Standard Verlet (Adaptive)", 
-        #                "Leapfrog Verlet (Adaptive)",
-                       "Beeman (Adaptive)"]
+    verlet_algorithms = [velocity_verlet_adaptive, standard_verlet_adaptive, leapfrog_verlet_adaptive]
+    algorithm_names = ["Velocity-Verlet (Adaptive)",
+                       "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
 
-    preliminary_steps = 10
+    preliminary_steps = 100
     potential_energies_per_algorithm, energy_drifts_per_algorithm, best_time_steps = run_preliminary_steps_parallel(
-        preliminary_temperatures,
-        preliminary_seeds,  
-        verlet_algorithms,
+        temperatures[:3],
+        seeds[:3], verlet_algorithms,
         algorithm_names, time_steps, preliminary_steps)
 
     best_algorithm_index = np.argmin([pe + ed for pe,
@@ -383,7 +341,7 @@ def main():
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    sampling_step_range = [100]
+    sampling_step_range = [20]
     sampling_results = find_best_sampling_steps(temperatures[0],
                 seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
 
@@ -401,7 +359,7 @@ def main():
     
     dts, potential_energies, energy_drifts = zip(*results)
     
-    end_time = time.time()  
+    end_time = time.time()  # End time measurement
     runtime = end_time - start_time
     print(f"Runtime: {runtime:.2f} seconds")
     
@@ -433,7 +391,7 @@ def main():
     plt.legend()
     plt.show()
     
-    generate_pdf_report("MD_Simulation_Report5(Beemans check).pdf",
+    generate_pdf_report("MD_Simulation_Report5(debugMAIN).pdf",
     melting_point, boiling_point, a_opt,
     temperatures, potential_energies, 
     runtime, best_algorithm_name, best_time_step, reason)
@@ -441,4 +399,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
