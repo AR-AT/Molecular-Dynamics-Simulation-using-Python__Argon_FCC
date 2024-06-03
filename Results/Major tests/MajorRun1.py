@@ -234,26 +234,27 @@ def test_time_steps(T, seed, verlet_algorithm,
 
 
 def run_preliminary_steps_parallel(temperatures,
-   seeds, verlet_algorithms, algorithm_names, time_steps,
-   preliminary_steps):
+                                   seeds, verlet_algorithms, algorithm_names, time_steps,
+                                   preliminary_steps):
     """Run preliminary steps in parallel."""
     with Pool(16) as pool:
         args = [(T, seed, alg, dt, preliminary_steps)
                 for T, seed, alg, dt in zip(temperatures, seeds,
-                    verlet_algorithms * len(time_steps),
-                    time_steps * len(verlet_algorithms))]
+                                            verlet_algorithms * len(time_steps),
+                                            time_steps * len(verlet_algorithms))]
+        print(f"Args: {args}")  # Debug: print args to ensure they are correct
         results = pool.starmap(run_md_for_temperature, args)
+        print(f"Results: {results}")  # Debug: print results to ensure they are not empty
     
     potential_energies_per_algorithm = []
     energy_drifts_per_algorithm = []
     best_time_steps = []
 
-
-
-
-
     for i, alg in enumerate(verlet_algorithms):
         alg_results = results[i * len(time_steps):(i + 1) * len(time_steps)]
+        if len(alg_results) == 0:
+            print(f"No results for algorithm {algorithm_names[i]}")  # Debug: print if alg_results is empty
+            continue
         potential_energies = [res[1] for res in alg_results]
         energy_drifts = [res[2] for res in alg_results]
         best_time_step = time_steps[np.argmin([res[2] for res in alg_results])]
@@ -331,13 +332,13 @@ def main():
     a_opt = optimize_lattice_parameter()
     print(f"Optimized lattice parameter: {a_opt}")
 
-    # Main simulation temperatures
+    
     temperatures = np.arange(5, 205, 5)
     
-    # Preliminary simulation temperatures
+    
     preliminary_temperatures = np.arange(75, 95, 5)  
     
-    time_steps = [ 1e-15,1e-14,1e-16, 5e-16]
+    time_steps = [1e-15, 1e-14, 1e-16, 5e-16]
  
     seeds = np.random.randint(0, 10000, len(temperatures))
     preliminary_seeds = np.random.randint(0, 10000, len(preliminary_temperatures))
@@ -353,9 +354,13 @@ def main():
         verlet_algorithms,
         algorithm_names, time_steps, preliminary_steps)
 
+    if not potential_energies_per_algorithm or not energy_drifts_per_algorithm or not best_time_steps:
+        print("Error: No valid preliminary results obtained.")
+        return
+
     best_algorithm_index = np.argmin([pe + ed for pe,
-                          ed in zip(potential_energies_per_algorithm,
-                                energy_drifts_per_algorithm)])
+                                      ed in zip(potential_energies_per_algorithm,
+                                                energy_drifts_per_algorithm)])
     best_verlet_algorithm = verlet_algorithms[best_algorithm_index]
     best_algorithm_name = algorithm_names[best_algorithm_index]
     best_time_step = best_time_steps[best_algorithm_index]
@@ -367,7 +372,7 @@ def main():
 
     sampling_step_range = [20000, 40000, 60000, 15000, 80000]
     sampling_results = find_best_sampling_steps(temperatures[0],
-                seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
+                                                seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
 
     for sampling_steps, potential_energy, energy_drift in sampling_results:
         print(f"Sampling steps: {sampling_steps}, Potential energy: {potential_energy:.2e} J, Energy drift: {energy_drift:.2e} J")
@@ -416,9 +421,9 @@ def main():
     plt.show()
     
     generate_pdf_report("MajorRun1.pdf",
-    melting_point, boiling_point, a_opt,
-    temperatures, potential_energies, 
-    runtime, best_algorithm_name, best_time_step, reason)
+                        melting_point, boiling_point, a_opt,
+                        temperatures, potential_energies, 
+                        runtime, best_algorithm_name, best_time_step, reason)
 
 
 if __name__ == "__main__":
