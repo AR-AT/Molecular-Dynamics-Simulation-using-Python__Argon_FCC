@@ -7,6 +7,10 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from tqdm import tqdm
 from numba import njit, prange
+import logging
+
+
+logging.basicConfig(filename='md_simulation.log', level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
 
 EPSILON = 1.654017502e-21  
 SIGMA = 3.405e-10  
@@ -146,16 +150,14 @@ def leapfrog_verlet_adaptive(positions,
 
 
 
-def adaptive_equilibration(positions, velocities,
-                           forces, dt, box_length,
-                           verlet_algorithm,
-                           equilibration_window=1000, threshold=5e-25):
+def adaptive_equilibration(positions, velocities, forces, dt, box_length,
+                           verlet_algorithm, equilibration_window=2000, threshold=5e-25, max_steps=50000):
     """Perform adaptive equilibration."""
     equilibration_steps = 0
     recent_potential_energies = []
     forces, _ = compute_forces(positions, box_length)
     with tqdm(total=equilibration_window, desc="Equilibration") as pbar:
-        while True:
+        while equilibration_steps < max_steps:
             positions, velocities, forces, dt = verlet_algorithm(positions,
                 velocities, forces, dt, box_length)
             _, potential_energy = compute_forces(positions, box_length)
@@ -163,14 +165,16 @@ def adaptive_equilibration(positions, velocities,
             if len(recent_potential_energies) > equilibration_window:
                 recent_potential_energies.pop(0)
                 mean_potential_energy = np.mean(recent_potential_energies)
-                if np.abs(potential_energy - mean_potential_energy) < threshold:
+                std_potential_energy = np.std(recent_potential_energies)
+                if std_potential_energy < threshold and np.abs(potential_energy - mean_potential_energy) < threshold:
+                    logging.info(f"Equilibration completed in {equilibration_steps} steps with dt={dt:.2e}")
                     break
                 pbar.update(1)
             equilibration_steps += 1
-            
-           # if equilibration_steps % 1000 == 0:
-           #     print(f"Step {equilibration_steps}, dt: {dt:.2e}, Potential Energy: {potential_energy:.5e}")
+            if equilibration_steps % 1000 == 0:
+                logging.info(f"Step {equilibration_steps}: Potential Energy = {potential_energy:.5e}, dt = {dt:.2e}")
     return positions, velocities, forces, dt, equilibration_steps
+
 
 
 
@@ -197,6 +201,9 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
     positions, velocities, forces, dt, equilibration_steps = adaptive_equilibration(
         positions, velocities, forces, dt, box_length, verlet_algorithm
     )
+
+    logging.info(f"Equilibration steps: {equilibration_steps}")
+
     print(f"Equilibration steps: {equilibration_steps}")
 
     potential_energy = 0
@@ -225,7 +232,10 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
             total_energy_drift += abs(total_energy - initial_total_energy)
             count += 1
             pbar.update(1)
-    
+            if step % 1000 == 0:
+                logging.info(f"Step {step}: Kinetic Energy = {kinetic_energy:.5e}, Potential Energy = {potential_energy_step:.5e}, Total Energy = {total_energy:.5e}")
+	    
+        
         average_potential_energy = potential_energy / count / N  
         energy_drift = total_energy_drift / count
     
@@ -282,6 +292,8 @@ def run_preliminary_steps_parallel(temperatures, seeds, verlet_algorithms, algor
     for i, alg_results in enumerate(results):
         if len(alg_results) == 0:
             print(f"No results for algorithm {algorithm_names[i]}")  
+            logging.warning(f"No results for algorithm {algorithm_names[i]}")
+            
             continue
         potential_energies = [res[1] for res in alg_results]
         energy_drifts = [res[2] for res in alg_results]
@@ -368,6 +380,7 @@ def main():
 
     a_opt = optimize_lattice_parameter()
     print(f"Optimized lattice parameter: {a_opt}")
+    logging.info(f"Optimized lattice parameter: {a_opt}")
     
     
     
@@ -411,6 +424,7 @@ def main():
 
     if not potential_energies_per_algorithm or not energy_drifts_per_algorithm or not best_time_steps:
         print("Error: No valid preliminary results obtained.")
+        logging.error("No valid preliminary results obtained.")
         return
 
 
@@ -439,9 +453,12 @@ def main():
 
     for sampling_steps, potential_energy, energy_drift in sampling_results:
         print(f"Sampling steps: {sampling_steps}, Potential energy: {potential_energy:.2e} J, Energy drift: {energy_drift:.2e} J")
+        logging.info(f"Sampling steps: {sampling_steps}, Potential energy: {potential_energy:.2e} J, Energy drift: {energy_drift:.2e} J")
 
     best_sampling_steps = min(sampling_results, key=lambda x: x[2])[0]
     print(f"Best sampling steps: {best_sampling_steps}")
+    logging.info(f"Best sampling steps: {best_sampling_steps}")
+
 
     with Pool(16) as pool:
         results = pool.starmap(run_md_for_temperature,
