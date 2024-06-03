@@ -297,7 +297,7 @@ def main():
     algorithm_names = ["Velocity-Verlet (Adaptive)"]
                # "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
 
-    preliminary_steps = 2000
+    preliminary_steps = 10000
     potential_energies_per_algorithm = []
     energy_drifts_per_algorithm = []
     best_time_steps = []

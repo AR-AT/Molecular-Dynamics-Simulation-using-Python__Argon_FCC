@@ -10,8 +10,8 @@ from tqdm import tqdm
 from numba import njit, prange
 
 
-EPSILON = 1.65e-21  
-SIGMA = 3.4e-10  
+EPSILON = 1.654017502e-21  
+SIGMA = 3.405e-10  
 MASS = 6.63e-26  
 K_B = 1.38e-23 
 
@@ -65,7 +65,7 @@ def compute_forces(positions, box_length):
         for j in range(i + 1, N):
             r_vec = apply_pbc(positions[i] - positions[j], box_length)
             r2 = np.dot(r_vec, r_vec)
-            if r2 < (2.5 * SIGMA) ** 2:
+            if r2 < (4 * SIGMA) ** 2:
                 potential, force = lennard_jones(r2)
                 f = force * r_vec
                 forces[i] += f
@@ -76,7 +76,7 @@ def compute_forces(positions, box_length):
 
 @njit
 def velocity_verlet_adaptive(positions,
-            velocities, forces, dt, box_length, max_force_threshold=1e-10):
+            velocities, forces, dt, box_length, max_force_threshold=1e-11):
     """Velocity-Verlet integration with adaptive time step."""
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
@@ -84,7 +84,7 @@ def velocity_verlet_adaptive(positions,
     max_force = np.max(custom_norm(new_forces, axis=1))
     
     if max_force > max_force_threshold:
-        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-16)
+        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 5e-16)
     
     new_velocities = velocities + 0.5 * (forces + new_forces) * dt / MASS
     return new_positions, new_velocities, new_forces, dt
@@ -127,7 +127,7 @@ def leapfrog_verlet_adaptive(positions,
 def adaptive_equilibration(positions, velocities,
                            forces, dt, box_length,
                            verlet_algorithm,
-                           equilibration_window=200, threshold=1e-23):
+                           equilibration_window=150, threshold=1e-23):
     """Perform adaptive equilibration."""
     equilibration_steps = 0
     recent_potential_energies = []
@@ -146,8 +146,8 @@ def adaptive_equilibration(positions, velocities,
                 pbar.update(1)
             equilibration_steps += 1
             
-            if equilibration_steps % 1000 == 0:
-                print(f"Step {equilibration_steps}, dt: {dt:.2e}, Potential Energy: {potential_energy:.5e}")
+           # if equilibration_steps % 1000 == 0:
+           #     print(f"Step {equilibration_steps}, dt: {dt:.2e}, Potential Energy: {potential_energy:.5e}")
     return positions, velocities, forces, dt, equilibration_steps
 
 def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
@@ -214,7 +214,7 @@ def optimize_lattice_parameter():
     """Optimize the lattice parameter."""
     initial_guesses = np.linspace(5e-10, 6e-10, 300)
     results = [minimize(potential_energy_for_lattice,
-                        [guess], bounds=[(4e-10, 6e-10)]) for
+                        [guess], bounds=[(5e-10, 6e-10)]) for
                guess in initial_guesses]
     best_result = min(results, key=lambda x: x.fun)
     return best_result.x[0]
@@ -222,7 +222,7 @@ def optimize_lattice_parameter():
 def test_time_steps(T, seed, verlet_algorithm,
                     time_steps, sampling_steps=60000):
     """Test different time steps."""
-    with Pool(4) as pool:
+    with Pool(16) as pool:
         args = [(T, seed, verlet_algorithm,
                  dt, sampling_steps) for dt in time_steps]
         results = pool.starmap(run_md_for_temperature, args)
@@ -289,7 +289,7 @@ def main():
     print(f"Optimized lattice parameter: {a_opt}")
 
     temperatures = np.arange(5, 205, 5)
-    time_steps = [1e-15, 5e-16]  # Different time steps to test
+    time_steps = [1e-15]  # Different time steps to test
     seeds = np.random.randint(0, 10000, len(temperatures))
 
     verlet_algorithms = [velocity_verlet_adaptive]
@@ -297,7 +297,7 @@ def main():
     algorithm_names = ["Velocity-Verlet (Adaptive)"]
                # "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
 
-    preliminary_steps = 2000
+    preliminary_steps = 100
     potential_energies_per_algorithm = []
     energy_drifts_per_algorithm = []
     best_time_steps = []
@@ -328,7 +328,7 @@ def main():
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    sampling_step_range = [ 100000,80000, 50000, 40000, 60000]
+    sampling_step_range = [10000]
     sampling_results = find_best_sampling_steps(temperatures[0],
                 seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
 
@@ -338,7 +338,7 @@ def main():
     best_sampling_steps = min(sampling_results, key=lambda x: x[2])[0]
     print(f"Best sampling steps: {best_sampling_steps}")
 
-    with Pool(4) as pool:
+    with Pool(16) as pool:
         results = pool.starmap(run_md_for_temperature,
                                [(T, seed, best_verlet_algorithm,
                                  best_time_step, best_sampling_steps)

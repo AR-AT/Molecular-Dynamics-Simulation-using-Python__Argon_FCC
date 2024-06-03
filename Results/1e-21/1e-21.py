@@ -76,7 +76,7 @@ def compute_forces(positions, box_length):
 
 @njit
 def velocity_verlet_adaptive(positions,
-            velocities, forces, dt, box_length, max_force_threshold=1e-10):
+            velocities, forces, dt, box_length, max_force_threshold=5e-11):
     """Velocity-Verlet integration with adaptive time step."""
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
@@ -127,7 +127,7 @@ def leapfrog_verlet_adaptive(positions,
 def adaptive_equilibration(positions, velocities,
                            forces, dt, box_length,
                            verlet_algorithm,
-                           equilibration_window=200, threshold=1e-23):
+                           equilibration_window=200, threshold=1e-21):
     """Perform adaptive equilibration."""
     equilibration_steps = 0
     recent_potential_energies = []
@@ -297,7 +297,7 @@ def main():
     algorithm_names = ["Velocity-Verlet (Adaptive)"]
                # "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
 
-    preliminary_steps = 2000
+    preliminary_steps = 10000
     potential_energies_per_algorithm = []
     energy_drifts_per_algorithm = []
     best_time_steps = []

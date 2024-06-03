@@ -76,7 +76,7 @@ def compute_forces(positions, box_length):
 
 @njit
 def velocity_verlet_adaptive(positions,
-            velocities, forces, dt, box_length, max_force_threshold=1e-10):
+            velocities, forces, dt, box_length, max_force_threshold=5e-11):
     """Velocity-Verlet integration with adaptive time step."""
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
@@ -84,7 +84,7 @@ def velocity_verlet_adaptive(positions,
     max_force = np.max(custom_norm(new_forces, axis=1))
     
     if max_force > max_force_threshold:
-        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-16)
+        dt = max(0.9 * dt * (max_force_threshold / max_force)**0.5, 1e-15)
     
     new_velocities = velocities + 0.5 * (forces + new_forces) * dt / MASS
     return new_positions, new_velocities, new_forces, dt
@@ -289,7 +289,7 @@ def main():
     print(f"Optimized lattice parameter: {a_opt}")
 
     temperatures = np.arange(5, 205, 5)
-    time_steps = [1e-15, 5e-16]  # Different time steps to test
+    time_steps = [1e-15]  # Different time steps to test
     seeds = np.random.randint(0, 10000, len(temperatures))
 
     verlet_algorithms = [velocity_verlet_adaptive]
@@ -297,7 +297,7 @@ def main():
     algorithm_names = ["Velocity-Verlet (Adaptive)"]
                # "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
 
-    preliminary_steps = 2000
+    preliminary_steps = 100
     potential_energies_per_algorithm = []
     energy_drifts_per_algorithm = []
     best_time_steps = []
@@ -328,7 +328,7 @@ def main():
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    sampling_step_range = [ 100000,80000, 50000, 40000, 60000]
+    sampling_step_range = [60000]
     sampling_results = find_best_sampling_steps(temperatures[0],
                 seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
 
