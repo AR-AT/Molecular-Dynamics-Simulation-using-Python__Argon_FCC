@@ -217,6 +217,9 @@ def optimize_lattice_parameter():
     best_result = min(results, key=lambda x: x.fun)
     return best_result.x[0]
 
+
+
+
 def test_time_steps(T, seed, verlet_algorithm,
                     time_steps, sampling_steps=60000):
     """Test different time steps."""
@@ -225,6 +228,10 @@ def test_time_steps(T, seed, verlet_algorithm,
                  dt, sampling_steps) for dt in time_steps]
         results = pool.starmap(run_md_for_temperature, args)
     return results
+
+
+
+
 
 def run_preliminary_steps_parallel(temperatures,
    seeds, verlet_algorithms, algorithm_names, time_steps,
@@ -241,6 +248,10 @@ def run_preliminary_steps_parallel(temperatures,
     energy_drifts_per_algorithm = []
     best_time_steps = []
 
+
+
+
+
     for i, alg in enumerate(verlet_algorithms):
         alg_results = results[i * len(time_steps):(i + 1) * len(time_steps)]
         potential_energies = [res[1] for res in alg_results]
@@ -253,6 +264,9 @@ def run_preliminary_steps_parallel(temperatures,
     
     return potential_energies_per_algorithm, energy_drifts_per_algorithm, best_time_steps
 
+
+
+
 def find_best_sampling_steps(T, seed, verlet_algorithm,
                 time_step, sampling_step_range):
     """Find the best sampling steps."""
@@ -262,6 +276,9 @@ def find_best_sampling_steps(T, seed, verlet_algorithm,
                             verlet_algorithm, time_step, sampling_steps)
         results.append((sampling_steps, potential_energy, energy_drift))
     return results
+
+
+
 
 def generate_pdf_report(filename,
                         melting_point, boiling_point, a_opt,
@@ -309,24 +326,31 @@ def generate_pdf_report(filename,
 
 def main():
     """Main function to run the MD simulation."""
-    start_time = time.time()  # Start time measurement
+    start_time = time.time()  
 
     a_opt = optimize_lattice_parameter()
     print(f"Optimized lattice parameter: {a_opt}")
 
+    # Main simulation temperatures
     temperatures = np.arange(5, 205, 5)
-    time_steps = [1e-14]
+    
+    # Preliminary simulation temperatures
+    preliminary_temperatures = np.arange(90, 105, 5)  
+    
+    time_steps = [ 1e-15]
  
     seeds = np.random.randint(0, 10000, len(temperatures))
+    preliminary_seeds = np.random.randint(0, 10000, len(preliminary_temperatures))
 
     verlet_algorithms = [velocity_verlet_adaptive, standard_verlet_adaptive, leapfrog_verlet_adaptive]
     algorithm_names = ["Velocity-Verlet (Adaptive)",
                        "Standard Verlet (Adaptive)", "Leapfrog Verlet (Adaptive)"]
 
-    preliminary_steps = 100
+    preliminary_steps = 10
     potential_energies_per_algorithm, energy_drifts_per_algorithm, best_time_steps = run_preliminary_steps_parallel(
-        temperatures[:3],
-        seeds[:3], verlet_algorithms,
+        preliminary_temperatures,
+        preliminary_seeds,  # Use seeds for preliminary temperatures
+        verlet_algorithms,
         algorithm_names, time_steps, preliminary_steps)
 
     best_algorithm_index = np.argmin([pe + ed for pe,
@@ -341,7 +365,7 @@ def main():
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    sampling_step_range = [20]
+    sampling_step_range = [200]
     sampling_results = find_best_sampling_steps(temperatures[0],
                 seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
 
@@ -391,7 +415,7 @@ def main():
     plt.legend()
     plt.show()
     
-    generate_pdf_report("MD_Simulation_Report5(debugMAIN).pdf",
+    generate_pdf_report("MD_Simulation_Report6(Preliminary temp change).pdf",
     melting_point, boiling_point, a_opt,
     temperatures, potential_energies, 
     runtime, best_algorithm_name, best_time_step, reason)
