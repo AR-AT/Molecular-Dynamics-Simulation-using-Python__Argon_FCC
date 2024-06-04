@@ -8,9 +8,13 @@ from reportlab.pdfgen import canvas
 from tqdm import tqdm
 from numba import njit, prange
 import logging
+import os
+
+script_base_name = os.path.splitext(os.path.basename(__file__))[0]
 
 
-logging.basicConfig(filename='md_simulation3_R.log', level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
+logging.basicConfig(filename=f'{script_base_name}.log', level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
+
 
 EPSILON = 1.654017502e-21  
 SIGMA = 3.405e-10  
@@ -151,7 +155,7 @@ def leapfrog_verlet_adaptive(positions,
 
 
 def adaptive_equilibration(positions, velocities, forces, dt, box_length,
-                           verlet_algorithm, equilibration_window=2000, threshold=1e-23, max_steps=20000):
+                           verlet_algorithm, equilibration_window=2000, threshold=1e-24, max_steps=20000):
     """Perform adaptive equilibration."""
     equilibration_steps = 0
     recent_potential_energies = []
@@ -322,11 +326,12 @@ def find_best_sampling_steps(T, seed, verlet_algorithm,
 
 
 
-def generate_pdf_report(filename,
-                        melting_point, boiling_point, a_opt,
-                        temperatures, potential_energies, runtime,
-                        best_algorithm_name, best_time_step, reason):
+def generate_pdf_report(melting_point, boiling_point, a_opt, temperatures, potential_energies, runtime, best_algorithm_name, best_time_step, reason):
     """Generate a PDF report."""
+    script_base_name = os.path.splitext(os.path.basename(__file__))[0]
+    filename = f"{script_base_name}.pdf"
+    plot_filename = f"{script_base_name}.png"
+
     c = canvas.Canvas(filename, pagesize=letter)
     width, height = letter
 
@@ -340,34 +345,32 @@ def generate_pdf_report(filename,
 
     reason_text = f"Reason: {reason}"
     max_chars_per_line = 78
-    wrapped_reason = "\n".join([reason_text[i:i+max_chars_per_line] for i in range(0,
-                            len(reason_text), max_chars_per_line)])
+    wrapped_reason = "\n".join([reason_text[i:i + max_chars_per_line] for i in range(0, len(reason_text), max_chars_per_line)])
     text_lines = wrapped_reason.split('\n')
     for i, line in enumerate(text_lines):
-        c.drawString(50, height - 190 - i*20, line)
+        c.drawString(50, height - 190 - i * 20, line)
 
-
-
-
-
-    plot_filename = "temp_plot3.png"
+    # Plot and save the temperature vs potential energy graph
     plt.figure(figsize=(10, 6))
-    plt.plot(temperatures, potential_energies,
-    marker='o', linestyle='-', label='Average Potential Energy per Atom (MD Simulation)')
+    plt.plot(temperatures, potential_energies, marker='o', linestyle='-', label='Average Potential Energy per Atom (MD Simulation)')
     plt.xlabel('Temperature (K)')
     plt.ylabel('Average Potential Energy per Atom (J)')
     plt.title('Average Potential Energy per Atom vs Temperature for Argon')
-    plt.axvline(melting_point, color='r', linestyle='--',
-        label=f'Melting Point: {melting_point} K')
-    plt.axvline(boiling_point, color='g', linestyle='--',
-        label=f'Boiling Point: {boiling_point} K')
+    plt.axvline(melting_point, color='r', linestyle='--', label=f'Melting Point: {melting_point} K')
+    plt.axvline(boiling_point, color='g', linestyle='--', label=f'Boiling Point: {boiling_point} K')
     plt.legend()
     plt.grid(True)
-    # plt.savefig(plot_filename)
+    plt.savefig(plot_filename)  # Save the plot
     plt.close()
 
-    c.drawImage(plot_filename, 50, 200, width=500, height=300)
+    # Ensure the image file exists before attempting to draw it
+    try:
+        c.drawImage(plot_filename, 50, 200, width=500, height=300)
+    except FileNotFoundError:
+        logging.error(f"File {plot_filename} not found. Skipping image in the PDF report.")
+
     c.save()
+
 
 
 
@@ -500,10 +503,11 @@ def main():
     plt.legend()
     plt.show()
     
-    generate_pdf_report("MajorRun3_R.pdf",
-                        melting_point, boiling_point, a_opt,
-                        temperatures, potential_energies, 
-                        runtime, best_algorithm_name, best_time_step, reason)
+    generate_pdf_report(melting_point,
+            boiling_point, a_opt, temperatures,
+    potential_energies, runtime, best_algorithm_name,
+    best_time_step, reason)
+
 
 
 if __name__ == "__main__":

@@ -8,18 +8,20 @@ from reportlab.pdfgen import canvas
 from tqdm import tqdm
 from numba import njit, prange
 import logging
+import os
 
+# Get the directory of the current script
+script_dir = os.path.dirname(os.path.abspath(__file__))
+script_base_name = os.path.splitext(os.path.basename(__file__))[0]
 
-logging.basicConfig(filename='md_simulation3_R.log', level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
+# Set up logging with the script's base name and directory
+log_file_path = os.path.join(script_dir, f'{script_base_name}.log')
+logging.basicConfig(filename=log_file_path, level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
 
 EPSILON = 1.654017502e-21  
 SIGMA = 3.405e-10  
 MASS = 6.63e-26  
 K_B = 1.38e-23 
-
-
-
-
 
 def create_fcc_lattice(a, n):
     """Create an FCC lattice."""
@@ -36,9 +38,6 @@ def create_fcc_lattice(a, n):
                     index += 1
     return positions
 
-
-
-
 @njit
 def lennard_jones(r2):
     """Calculate the Lennard-Jones potential and force."""
@@ -48,14 +47,10 @@ def lennard_jones(r2):
     force = 24 * EPSILON * (2 * r12 - r6) / r2
     return potential, force
 
-
-
 @njit
 def apply_pbc(position, box_length):
     """Apply periodic boundary conditions."""
     return position - box_length * np.round(position / box_length)
-
-
 
 @njit
 def custom_norm(arr, axis=1):
@@ -67,18 +62,12 @@ def custom_norm(arr, axis=1):
     else:
         raise ValueError("Invalid axis")
 
-
-
-
 @njit(parallel=True)
 def compute_forces(positions, box_length):
     """Compute forces using Lennard-Jones potential with PBC."""
     N = len(positions)
     forces = np.zeros_like(positions)
     potential_energy = 0.0
-
-
-
 
     for i in prange(N):
         for j in range(i + 1, N):
@@ -92,8 +81,6 @@ def compute_forces(positions, box_length):
                 potential_energy += potential
                 
     return forces, potential_energy
-
-
 
 @njit
 def velocity_verlet_adaptive(positions,
@@ -110,9 +97,6 @@ def velocity_verlet_adaptive(positions,
     new_velocities = velocities + 0.5 * (forces + new_forces) * dt / MASS
     return new_positions, new_velocities, new_forces, dt
 
-
-
-
 @njit
 def standard_verlet_adaptive(positions,
     velocities, forces, dt, box_length, max_force_threshold=1e-12):
@@ -127,8 +111,6 @@ def standard_verlet_adaptive(positions,
 
     new_velocities = velocities + new_forces * dt / MASS
     return new_positions, new_velocities, new_forces, dt
-
-
 
 @njit
 def leapfrog_verlet_adaptive(positions,
@@ -147,11 +129,8 @@ def leapfrog_verlet_adaptive(positions,
     new_velocities = velocities_half + new_forces * half_dt / MASS
     return new_positions, new_velocities, new_forces, dt
 
-
-
-
 def adaptive_equilibration(positions, velocities, forces, dt, box_length,
-                           verlet_algorithm, equilibration_window=2000, threshold=1e-23, max_steps=20000):
+                           verlet_algorithm, equilibration_window=200, threshold=1e-22, max_steps=500):
     """Perform adaptive equilibration."""
     equilibration_steps = 0
     recent_potential_energies = []
@@ -174,10 +153,6 @@ def adaptive_equilibration(positions, velocities, forces, dt, box_length,
             if equilibration_steps % 1000 == 0:
                 logging.info(f"Step {equilibration_steps}: Potential Energy = {potential_energy:.5e}, dt = {dt:.2e}")
     return positions, velocities, forces, dt, equilibration_steps
-
-
-
-
 
 def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
     """Run MD simulation for a single temperature using the specified Verlet algorithm."""
@@ -250,44 +225,38 @@ def potential_energy_for_lattice(a):
 
 def optimize_lattice_parameter():
     """Optimize the lattice parameter."""
-    initial_guesses = np.linspace(4.5e-10, 6e-10, 300)
+    initial_guesses = np.linspace(4.5e-10, 6e-10, 500)
     results = [minimize(potential_energy_for_lattice,
                         [guess], bounds=[(4.5e-10, 6e-10)]) for
                guess in initial_guesses]
     best_result = min(results, key=lambda x: x.fun)
     return best_result.x[0]
 
-
-
-
 def test_time_steps(T, seed, verlet_algorithm,
                     time_steps, sampling_steps=60000):
     """Test different time steps."""
-    with Pool(4) as pool:
+    with Pool(16) as pool:
         args = [(T, seed, verlet_algorithm,
                  dt, sampling_steps) for dt in time_steps]
         results = pool.starmap(run_md_for_temperature, args)
     return results
 
-
-
-
-
-def run_preliminary_steps_parallel(temperatures, seeds, verlet_algorithms, algorithm_names, time_steps, preliminary_steps):
+def run_preliminary_steps_parallel(temperatures, seeds,
+                   verlet_algorithms, algorithm_names, 
+               time_steps, preliminary_steps):
     """Run preliminary steps sequentially."""
     results = []
     for alg in verlet_algorithms:
         alg_results = []
         for T, seed, dt in zip(temperatures, seeds, time_steps):
-            result = run_md_for_temperature(T, seed, alg, dt, preliminary_steps)
+            result = run_md_for_temperature(T, seed, alg,
+                                            dt, preliminary_steps)
             alg_results.append(result)
         results.append(alg_results)
     
     potential_energies_per_algorithm = []
     energy_drifts_per_algorithm = []
     best_time_steps = []
-
-
 
     for i, alg_results in enumerate(results):
         if len(alg_results) == 0:
@@ -305,10 +274,6 @@ def run_preliminary_steps_parallel(temperatures, seeds, verlet_algorithms, algor
     
     return potential_energies_per_algorithm, energy_drifts_per_algorithm, best_time_steps
 
-
-
-
-
 def find_best_sampling_steps(T, seed, verlet_algorithm,
                 time_step, sampling_step_range):
     """Find the best sampling steps."""
@@ -319,14 +284,12 @@ def find_best_sampling_steps(T, seed, verlet_algorithm,
         results.append((sampling_steps, potential_energy, energy_drift))
     return results
 
-
-
-
-def generate_pdf_report(filename,
-                        melting_point, boiling_point, a_opt,
-                        temperatures, potential_energies, runtime,
-                        best_algorithm_name, best_time_step, reason):
+def generate_pdf_report(melting_point, boiling_point, a_opt, temperatures, potential_energies, runtime, best_algorithm_name, best_time_step, reason):
     """Generate a PDF report."""
+    script_base_name = os.path.splitext(os.path.basename(__file__))[0]
+    filename = os.path.join(script_dir, f"{script_base_name}.pdf")
+    plot_filename = os.path.join(script_dir, f"{script_base_name}.png")
+
     c = canvas.Canvas(filename, pagesize=letter)
     width, height = letter
 
@@ -340,85 +303,63 @@ def generate_pdf_report(filename,
 
     reason_text = f"Reason: {reason}"
     max_chars_per_line = 78
-    wrapped_reason = "\n".join([reason_text[i:i+max_chars_per_line] for i in range(0,
-                            len(reason_text), max_chars_per_line)])
+    wrapped_reason = "\n".join([reason_text[i:i + max_chars_per_line] for i in range(0, len(reason_text), max_chars_per_line)])
     text_lines = wrapped_reason.split('\n')
     for i, line in enumerate(text_lines):
-        c.drawString(50, height - 190 - i*20, line)
+        c.drawString(50, height - 190 - i * 20, line)
 
-
-
-
-
-    plot_filename = "temp_plot3.png"
+    # Plot and save the temperature vs potential energy graph
     plt.figure(figsize=(10, 6))
-    plt.plot(temperatures, potential_energies,
-    marker='o', linestyle='-', label='Average Potential Energy per Atom (MD Simulation)')
+    plt.plot(temperatures, potential_energies, marker='o', linestyle='-', label='Average Potential Energy per Atom (MD Simulation)')
     plt.xlabel('Temperature (K)')
     plt.ylabel('Average Potential Energy per Atom (J)')
     plt.title('Average Potential Energy per Atom vs Temperature for Argon')
-    plt.axvline(melting_point, color='r', linestyle='--',
-        label=f'Melting Point: {melting_point} K')
-    plt.axvline(boiling_point, color='g', linestyle='--',
-        label=f'Boiling Point: {boiling_point} K')
+    plt.axvline(melting_point, color='r', linestyle='--', label=f'Melting Point: {melting_point} K')
+    plt.axvline(boiling_point, color='g', linestyle='--', label=f'Boiling Point: {boiling_point} K')
     plt.legend()
     plt.grid(True)
-    # plt.savefig(plot_filename)
+    plt.savefig(plot_filename)  # Save the plot
     plt.close()
 
-    c.drawImage(plot_filename, 50, 200, width=500, height=300)
+    # Ensure the image file exists before attempting to draw it
+    try:
+        c.drawImage(plot_filename, 50, 200, width=500, height=300)
+    except FileNotFoundError:
+        logging.error(f"File {plot_filename} not found. Skipping image in the PDF report.")
+
     c.save()
-
-
-
-
-
 
 def main():
     """Main function to run the MD simulation."""
-    start_time = time.time()  
+    start_time = time.time()
 
     a_opt = optimize_lattice_parameter()
     print(f"Optimized lattice parameter: {a_opt}")
     logging.info(f"Optimized lattice parameter: {a_opt}")
-    
-    
-    
-    
 
-    
     temperatures = np.arange(5, 205, 5)
-    
-    
-    preliminary_temperatures = np.arange(60, 105, 5)  
-    
-    time_steps = [1e-15, 5e-15, 1e-14, 5e-16]
- 
+    preliminary_temperatures = np.arange(60, 105, 5)
+
+    time_steps = [1e-15,5e-16,5e-15,1e-14]
+
     seeds = np.random.randint(0, 10000, len(temperatures))
     preliminary_seeds = np.random.randint(0, 10000, len(preliminary_temperatures))
-
-
-
-
 
     verlet_algorithms = [
         velocity_verlet_adaptive,
         standard_verlet_adaptive,
         leapfrog_verlet_adaptive
-        ]
+    ]
     algorithm_names = [
         "Velocity-Verlet (Adaptive)",
-                       "Standard Verlet (Adaptive)", 
-                       "Leapfrog Verlet (Adaptive)"
-                       ]
+        "Standard Verlet (Adaptive)",
+        "Leapfrog Verlet (Adaptive)"
+    ]
 
-
-
-
-    preliminary_steps = 2000
+    preliminary_steps = 1000
     potential_energies_per_algorithm, energy_drifts_per_algorithm, best_time_steps = run_preliminary_steps_parallel(
         preliminary_temperatures,
-        preliminary_seeds, 
+        preliminary_seeds,
         verlet_algorithms,
         algorithm_names, time_steps, preliminary_steps)
 
@@ -427,10 +368,7 @@ def main():
         logging.error("No valid preliminary results obtained.")
         return
 
-
-    best_algorithm_index = np.argmin([pe + ed for pe,
-                                      ed in zip(potential_energies_per_algorithm,
-                                                energy_drifts_per_algorithm)])
+    best_algorithm_index = np.argmin([pe + ed for pe, ed in zip(potential_energies_per_algorithm, energy_drifts_per_algorithm)])
     best_verlet_algorithm = verlet_algorithms[best_algorithm_index]
     best_algorithm_name = algorithm_names[best_algorithm_index]
     best_time_step = best_time_steps[best_algorithm_index]
@@ -439,17 +377,9 @@ def main():
               f"during preliminary simulation.")
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
-    
-    
-    
 
-    sampling_step_range = [20000, 40000, 60000, 15000, 80000, 100000]
-    sampling_results = find_best_sampling_steps(temperatures[0],
-                                    seeds[0], best_verlet_algorithm,
-                                best_time_step, sampling_step_range)
-
-
-
+    sampling_step_range = [20000,15000,40000,60000,80000]
+    sampling_results = find_best_sampling_steps(temperatures[0], seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
 
     for sampling_steps, potential_energy, energy_drift in sampling_results:
         print(f"Sampling steps: {sampling_steps}, Potential energy: {potential_energy:.2e} J, Energy drift: {energy_drift:.2e} J")
@@ -459,52 +389,38 @@ def main():
     print(f"Best sampling steps: {best_sampling_steps}")
     logging.info(f"Best sampling steps: {best_sampling_steps}")
 
+    with Pool(16) as pool:
+        results = pool.starmap(run_md_for_temperature, [(T, seed, best_verlet_algorithm, best_time_step, best_sampling_steps) for T, seed in zip(temperatures, seeds)])
 
-    with Pool(4) as pool:
-        results = pool.starmap(run_md_for_temperature,
-                               [(T, seed, best_verlet_algorithm,
-                                 best_time_step, best_sampling_steps)
-                                for T, seed in zip(temperatures, seeds)])
-    
     dts, potential_energies, energy_drifts = zip(*results)
-    
-    end_time = time.time()  
+
+    end_time = time.time()
     runtime = end_time - start_time
     print(f"Runtime: {runtime:.2f} seconds")
-    
+
     first_derivative = np.gradient(potential_energies, temperatures)
     second_derivative = np.gradient(first_derivative, temperatures)
-    
+
     plt.figure(figsize=(10, 6))
-    plt.plot(temperatures, potential_energies,
-             marker='o', linestyle='-',
-             label='Average Potential Energy (MD Simulation)')
+    plt.plot(temperatures, potential_energies, marker='o', linestyle='-', label='Average Potential Energy (MD Simulation)')
     plt.xlabel('Temperature (K)')
     plt.ylabel('Average Potential Energy (J)')
     plt.title('Average Potential Energy vs Temperature for Argon')
     plt.legend()
     plt.grid(True)
-    
+
     melting_point = temperatures[np.argmax(first_derivative)]
-    
+
     post_melting_temperatures = temperatures[temperatures > melting_point]
     post_melting_second_derivative = second_derivative[temperatures > melting_point]
     boiling_point = post_melting_temperatures[np.argmax(post_melting_second_derivative)]
-    
-    plt.axvline(melting_point,
-                color='r', linestyle='--',
-                label=f'Melting Point: {melting_point} K')
-    plt.axvline(boiling_point,
-                color='g', linestyle='--',
-                label=f'Boiling Point: {boiling_point} K')
+
+    plt.axvline(melting_point, color='r', linestyle='--', label=f'Melting Point: {melting_point} K')
+    plt.axvline(boiling_point, color='g', linestyle='--', label=f'Boiling Point: {boiling_point} K')
     plt.legend()
     plt.show()
-    
-    generate_pdf_report("MajorRun3_R.pdf",
-                        melting_point, boiling_point, a_opt,
-                        temperatures, potential_energies, 
-                        runtime, best_algorithm_name, best_time_step, reason)
 
+    generate_pdf_report(melting_point, boiling_point, a_opt, temperatures, potential_energies, runtime, best_algorithm_name, best_time_step, reason)
 
 if __name__ == "__main__":
     main()

@@ -10,7 +10,7 @@ from numba import njit, prange
 import logging
 
 
-logging.basicConfig(filename='md_simulation3_R.log', level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
+logging.basicConfig(filename='md_simulation5_R.log', level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
 
 EPSILON = 1.654017502e-21  
 SIGMA = 3.405e-10  
@@ -151,7 +151,7 @@ def leapfrog_verlet_adaptive(positions,
 
 
 def adaptive_equilibration(positions, velocities, forces, dt, box_length,
-                           verlet_algorithm, equilibration_window=2000, threshold=1e-23, max_steps=20000):
+                           verlet_algorithm, equilibration_window=2000, threshold=1e-22, max_steps=20000):
     """Perform adaptive equilibration."""
     equilibration_steps = 0
     recent_potential_energies = []
@@ -500,7 +500,7 @@ def main():
     plt.legend()
     plt.show()
     
-    generate_pdf_report("MajorRun3_R.pdf",
+    generate_pdf_report("MajorRun5_R.pdf",
                         melting_point, boiling_point, a_opt,
                         temperatures, potential_energies, 
                         runtime, best_algorithm_name, best_time_step, reason)
