@@ -338,9 +338,12 @@ def main():
     logging.info(f"Optimized lattice parameter: {a_opt}")
 
     temperatures = np.arange(5, 205, 5)
-    preliminary_temperatures = np.arange(60, 105, 5)
+    preliminary_temperatures = np.arange(60, 105, 25)
 
-    time_steps = [1e-15,5e-16,5e-15,1e-14]
+    time_steps = [
+        1e-15
+        # ,5e-16,5e-15,1e-14
+        ]
 
     seeds = np.random.randint(0, 10000, len(temperatures))
     preliminary_seeds = np.random.randint(0, 10000, len(preliminary_temperatures))
@@ -356,7 +359,7 @@ def main():
         "Leapfrog Verlet (Adaptive)"
     ]
 
-    preliminary_steps = 1000
+    preliminary_steps = 10
     potential_energies_per_algorithm, energy_drifts_per_algorithm, best_time_steps = run_preliminary_steps_parallel(
         preliminary_temperatures,
         preliminary_seeds,
@@ -378,7 +381,7 @@ def main():
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    sampling_step_range = [20000,15000,40000,60000,80000]
+    sampling_step_range = [20]
     sampling_results = find_best_sampling_steps(temperatures[0], seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
 
     for sampling_steps, potential_energy, energy_drift in sampling_results:
@@ -413,10 +416,16 @@ def main():
 
     post_melting_temperatures = temperatures[temperatures > melting_point]
     post_melting_second_derivative = second_derivative[temperatures > melting_point]
-    boiling_point = post_melting_temperatures[np.argmax(post_melting_second_derivative)]
+
+    if post_melting_temperatures.size > 0 and post_melting_second_derivative.size > 0:
+        boiling_point = post_melting_temperatures[np.argmax(post_melting_second_derivative)]
+    else:
+        boiling_point = None
+        logging.warning("No boiling point found due to empty post-melting temperature or second derivative.")
 
     plt.axvline(melting_point, color='r', linestyle='--', label=f'Melting Point: {melting_point} K')
-    plt.axvline(boiling_point, color='g', linestyle='--', label=f'Boiling Point: {boiling_point} K')
+    if boiling_point:
+        plt.axvline(boiling_point, color='g', linestyle='--', label=f'Boiling Point: {boiling_point} K')
     plt.legend()
     plt.show()
 
