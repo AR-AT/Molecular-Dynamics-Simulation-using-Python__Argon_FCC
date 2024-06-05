@@ -131,9 +131,9 @@ def leapfrog_verlet_adaptive(positions,
     return new_positions, new_velocities, new_forces, dt
 
 def adaptive_equilibration(positions, velocities, forces, dt, box_length,
-                           verlet_algorithm, initial_equilibration_window=1000,
-                           initial_threshold=1e-21, min_threshold=1e-23,
-                           max_threshold=1e-20, max_steps=10000):
+                           verlet_algorithm, initial_equilibration_window=2000,
+                           initial_threshold=5e-21, min_threshold=1e-23,
+                           max_threshold=5e-20, max_steps=20000):
     """Perform adaptive equilibration with dynamic threshold and window adjustment."""
     equilibration_steps = 0
     recent_potential_energies = []
@@ -154,11 +154,11 @@ def adaptive_equilibration(positions, velocities, forces, dt, box_length,
 
                 # Dynamically adjust the threshold based on the standard deviation
                 if std_potential_energy > threshold:
-                    threshold = min(threshold * 1.2, max_threshold)
+                    threshold = min(threshold * 1.1, max_threshold)
                     equilibration_window = int(equilibration_window * 1.3)
                     logging.info(f"((std_potential_energy > threshold)) threshold: {threshold:.5e}, MEAN: {mean_potential_energy:.5e}")
                 else:
-                    threshold = max(threshold * 0.7, min_threshold)
+                    threshold = max(threshold * 0.8, min_threshold)
                     logging.info(f"((std_potential_energy < threshold)) threshold: {threshold:.5e}, MEAN: {mean_potential_energy:.5e}")
 
                 if std_potential_energy < threshold and np.abs(potential_energy - mean_potential_energy) < threshold:
@@ -169,6 +169,7 @@ def adaptive_equilibration(positions, velocities, forces, dt, box_length,
             if equilibration_steps % 1000 == 0:
                 logging.info(f"Step {equilibration_steps}: Potential Energy = {potential_energy:.5e}, dt = {dt:.2e}")
     return positions, velocities, forces, dt, equilibration_steps
+
 
 
 
@@ -243,7 +244,7 @@ def potential_energy_for_lattice(a):
 
 def optimize_lattice_parameter():
     """Optimize the lattice parameter."""
-    initial_guesses = np.linspace(4.5e-10, 6e-10, 1000)
+    initial_guesses = np.linspace(5e-10, 6e-10, 1000)
     results = [minimize(potential_energy_for_lattice,
                         [guess], bounds=[(4.5e-10, 6e-10)]) for
                guess in initial_guesses]
@@ -253,7 +254,7 @@ def optimize_lattice_parameter():
 def test_time_steps(T, seed, verlet_algorithm,
                     time_steps, sampling_steps=60000):
     """Test different time steps."""
-    with Pool(16) as pool:
+    with Pool(8) as pool:
         args = [(T, seed, verlet_algorithm,
                  dt, sampling_steps) for dt in time_steps]
         results = pool.starmap(run_md_for_temperature, args)
@@ -302,69 +303,6 @@ def find_best_sampling_steps(T, seed, verlet_algorithm,
         results.append((sampling_steps, potential_energy, energy_drift))
     return results
 
-
-
-def find_melting_boiling_points(temperatures, potential_energies, window_size_ratio=0.02, std_multiplier=1.1):
-    window_size = max(1, int(len(potential_energies) * window_size_ratio))
-    
-    std_devs = []
-    for i in range(len(potential_energies) - window_size + 1):
-        window = potential_energies[i:i + window_size]
-        std_devs.append(np.std(window))
-    
-    std_devs = np.array(std_devs)
-    
-    overall_std = np.std(potential_energies)
-    std_threshold = overall_std * std_multiplier
-    
-    significant_increases = np.diff(std_devs) > std_threshold
-
-    melting_point = None
-    boiling_point = None
-
-    for i in range(1, len(significant_increases)):
-        if significant_increases[i] and not significant_increases[i - 1]:
-            if melting_point is None:
-                melting_point_index = min(i + window_size // 2, len(temperatures) - 1)
-                if temperatures[melting_point_index] % 5 == 0:
-                    melting_point = temperatures[melting_point_index]
-            elif boiling_point is None:
-                boiling_point_index = min(i + window_size // 2, len(temperatures) - 1)
-                if temperatures[boiling_point_index] % 5 == 0:
-                    boiling_point = temperatures[boiling_point_index]
-                break
-
-    return melting_point, boiling_point
-
-
-
-
-
-
-
-
-def plot_potential_energy_vs_temperature(temperatures, potential_energies, melting_point, boiling_point):
-    plt.figure(figsize=(10, 6))
-    plt.plot(temperatures, potential_energies, marker='o', linestyle='-', label='Average Potential Energy (MD Simulation)')
-    plt.xlabel('Temperature (K)')
-    plt.ylabel('Average Potential Energy (J)')
-    plt.title('Average Potential Energy vs Temperature for Argon')
-
-    if melting_point is not None:
-        plt.axvline(melting_point, color='r', linestyle='--', label=f'Melting Point: {melting_point} K')
-    if boiling_point is not None:
-        plt.axvline(boiling_point, color='g', linestyle='--', label=f'Boiling Point: {boiling_point} K')
-    
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-
-
-
-
-
-
-
 def generate_pdf_report(melting_point, boiling_point, a_opt, temperatures, potential_energies, runtime, best_algorithm_name, best_time_step, reason):
     """Generate a PDF report."""
     script_base_name = os.path.splitext(os.path.basename(__file__))[0]
@@ -389,7 +327,7 @@ def generate_pdf_report(melting_point, boiling_point, a_opt, temperatures, poten
     for i, line in enumerate(text_lines):
         c.drawString(50, height - 190 - i * 20, line)
 
-    
+    # Plot and save the temperature vs potential energy graph
     plt.figure(figsize=(10, 6))
     plt.plot(temperatures, potential_energies, marker='o', linestyle='-', label='Average Potential Energy per Atom (MD Simulation)')
     plt.xlabel('Temperature (K)')
@@ -402,7 +340,7 @@ def generate_pdf_report(melting_point, boiling_point, a_opt, temperatures, poten
     plt.savefig(plot_filename)  # Save the plot
     plt.close()
 
-    
+    # Ensure the image file exists before attempting to draw it
     try:
         c.drawImage(plot_filename, 50, 200, width=500, height=300)
     except FileNotFoundError:
@@ -419,11 +357,10 @@ def main():
     logging.info(f"Optimized lattice parameter: {a_opt}")
 
     temperatures = np.arange(5, 205, 5)
-    preliminary_temperatures = np.arange(5, 205, 25)
+    preliminary_temperatures = np.arange(5, 205, 15)
 
-    time_steps = [
-        1e-15, 5e-16, 1e-16, 5e-15
-    ]
+    time_steps = [1e-16, 5e-16, 1e-15, 5e-15]
+
 
     seeds = np.random.randint(0, 10000, len(temperatures))
     preliminary_seeds = np.random.randint(0, 10000, len(preliminary_temperatures))
@@ -439,7 +376,7 @@ def main():
         "Leapfrog Verlet (Adaptive)"
     ]
 
-    preliminary_steps = 10000
+    preliminary_steps = 4000
     potential_energies_per_algorithm, energy_drifts_per_algorithm, best_time_steps = run_preliminary_steps_parallel(
         preliminary_temperatures,
         preliminary_seeds,
@@ -451,7 +388,8 @@ def main():
         logging.error("No valid preliminary results obtained.")
         return
 
-    best_algorithm_index = np.argmin([pe + ed for pe, ed in zip(potential_energies_per_algorithm, energy_drifts_per_algorithm)])
+    best_algorithm_index = np.argmin([pe + ed for pe, ed in zip(potential_energies_per_algorithm,
+                                        energy_drifts_per_algorithm)])
     best_verlet_algorithm = verlet_algorithms[best_algorithm_index]
     best_algorithm_name = algorithm_names[best_algorithm_index]
     best_time_step = best_time_steps[best_algorithm_index]
@@ -461,8 +399,10 @@ def main():
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    sampling_step_range = [20000, 40000, 60000, 80000]
-    sampling_results = find_best_sampling_steps(temperatures[0], seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
+    sampling_step_range = [ 20000, 40000, 60000, 80000]
+    sampling_results = find_best_sampling_steps(temperatures[0],
+        seeds[0], best_verlet_algorithm, best_time_step,
+        sampling_step_range)
 
     for sampling_steps, potential_energy, energy_drift in sampling_results:
         print(f"Sampling steps: {sampling_steps}, Potential energy: {potential_energy:.2e} J, Energy drift: {energy_drift:.2e} J")
@@ -472,8 +412,10 @@ def main():
     print(f"Best sampling steps: {best_sampling_steps}")
     logging.info(f"Best sampling steps: {best_sampling_steps}")
 
-    with Pool(16) as pool:
-        results = pool.starmap(run_md_for_temperature, [(T, seed, best_verlet_algorithm, best_time_step, best_sampling_steps) for T, seed in zip(temperatures, seeds)])
+    with Pool(8) as pool:
+        results = pool.starmap(run_md_for_temperature, [(T, seed,
+                             best_verlet_algorithm, best_time_step,
+                 best_sampling_steps) for T, seed in zip(temperatures, seeds)])
 
     dts, potential_energies, energy_drifts = zip(*results)
 
@@ -481,16 +423,40 @@ def main():
     runtime = end_time - start_time
     print(f"Runtime: {runtime:.2f} seconds")
 
-    
-    melting_point, boiling_point = find_melting_boiling_points(temperatures, potential_energies)
+    first_derivative = np.gradient(potential_energies, temperatures)
+    second_derivative = np.gradient(first_derivative, temperatures)
 
-    logging.info(f"Detected Melting Point: {melting_point} K")
-    logging.info(f"Detected Boiling Point: {boiling_point} K")
+    plt.figure(figsize=(10, 6))
+    plt.plot(temperatures, potential_energies, marker='o', linestyle='-',
+         label='Average Potential Energy (MD Simulation)')
+    plt.xlabel('Temperature (K)')
+    plt.ylabel('Average Potential Energy (J)')
+    plt.title('Average Potential Energy vs Temperature for Argon')
+    plt.legend()
+    plt.grid(True)
 
-    plot_potential_energy_vs_temperature(temperatures, potential_energies, melting_point, boiling_point)
+    melting_point = temperatures[np.argmax(first_derivative)]
 
-    generate_pdf_report(melting_point, boiling_point, a_opt, temperatures, potential_energies, runtime, best_algorithm_name, best_time_step, reason)
+    post_melting_temperatures = temperatures[temperatures > melting_point]
+    post_melting_second_derivative = second_derivative[temperatures > melting_point]
 
+    if post_melting_temperatures.size > 0 and post_melting_second_derivative.size > 0:
+        boiling_point = post_melting_temperatures[np.argmax(post_melting_second_derivative)]
+    else:
+        boiling_point = None
+        logging.warning("No boiling point found due to empty post-melting temperature or second derivative.")
+
+    plt.axvline(melting_point, color='r', linestyle='--',
+                label=f'Melting Point: {melting_point} K')
+    if boiling_point:
+        plt.axvline(boiling_point, color='g', linestyle='--',
+                    label=f'Boiling Point: {boiling_point} K')
+    plt.legend()
+    plt.show()
+
+    generate_pdf_report(melting_point, boiling_point,
+            a_opt, temperatures, potential_energies, runtime,
+            best_algorithm_name, best_time_step, reason)
 
 if __name__ == "__main__":
     main()

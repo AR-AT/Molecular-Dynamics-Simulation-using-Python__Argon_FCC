@@ -74,7 +74,7 @@ def compute_forces(positions, box_length):
         for j in range(i + 1, N):
             r_vec = apply_pbc(positions[i] - positions[j], box_length)
             r2 = np.dot(r_vec, r_vec)
-            if r2 < (3 * SIGMA) ** 2:
+            if r2 < (2.5 * SIGMA) ** 2:
                 potential, force = lennard_jones(r2)
                 f = force * r_vec
                 forces[i] += f
@@ -131,9 +131,9 @@ def leapfrog_verlet_adaptive(positions,
     return new_positions, new_velocities, new_forces, dt
 
 def adaptive_equilibration(positions, velocities, forces, dt, box_length,
-                           verlet_algorithm, initial_equilibration_window=1000,
-                           initial_threshold=1e-21, min_threshold=1e-23,
-                           max_threshold=1e-20, max_steps=10000):
+                           verlet_algorithm, initial_equilibration_window=2000,
+                           initial_threshold=5e-21, min_threshold=1e-23,
+                           max_threshold=5e-20, max_steps=20000):
     """Perform adaptive equilibration with dynamic threshold and window adjustment."""
     equilibration_steps = 0
     recent_potential_energies = []
@@ -154,11 +154,11 @@ def adaptive_equilibration(positions, velocities, forces, dt, box_length,
 
                 # Dynamically adjust the threshold based on the standard deviation
                 if std_potential_energy > threshold:
-                    threshold = min(threshold * 1.2, max_threshold)
+                    threshold = min(threshold * 1.1, max_threshold)
                     equilibration_window = int(equilibration_window * 1.3)
                     logging.info(f"((std_potential_energy > threshold)) threshold: {threshold:.5e}, MEAN: {mean_potential_energy:.5e}")
                 else:
-                    threshold = max(threshold * 0.7, min_threshold)
+                    threshold = max(threshold * 0.8, min_threshold)
                     logging.info(f"((std_potential_energy < threshold)) threshold: {threshold:.5e}, MEAN: {mean_potential_energy:.5e}")
 
                 if std_potential_energy < threshold and np.abs(potential_energy - mean_potential_energy) < threshold:
@@ -253,7 +253,7 @@ def optimize_lattice_parameter():
 def test_time_steps(T, seed, verlet_algorithm,
                     time_steps, sampling_steps=60000):
     """Test different time steps."""
-    with Pool(16) as pool:
+    with Pool(8) as pool:
         args = [(T, seed, verlet_algorithm,
                  dt, sampling_steps) for dt in time_steps]
         results = pool.starmap(run_md_for_temperature, args)
@@ -305,6 +305,7 @@ def find_best_sampling_steps(T, seed, verlet_algorithm,
 
 
 def find_melting_boiling_points(temperatures, potential_energies, window_size_ratio=0.02, std_multiplier=1.1):
+    # Calculate window size based on the ratio
     window_size = max(1, int(len(potential_energies) * window_size_ratio))
     
     std_devs = []
@@ -314,6 +315,7 @@ def find_melting_boiling_points(temperatures, potential_energies, window_size_ra
     
     std_devs = np.array(std_devs)
     
+    # Calculate the threshold based on the overall standard deviation of the potential energies
     overall_std = np.std(potential_energies)
     std_threshold = overall_std * std_multiplier
     
@@ -334,7 +336,22 @@ def find_melting_boiling_points(temperatures, potential_energies, window_size_ra
                     boiling_point = temperatures[boiling_point_index]
                 break
 
+    # Use derivative-based method if no points found by adaptive method
+    if melting_point is None or boiling_point is None:
+        first_derivative = np.gradient(potential_energies, temperatures)
+        second_derivative = np.gradient(first_derivative, temperatures)
+
+        melting_point = temperatures[np.argmax(first_derivative)]
+        post_melting_temperatures = temperatures[temperatures > melting_point]
+        post_melting_second_derivative = second_derivative[temperatures > melting_point]
+
+        if post_melting_temperatures.size > 0 and post_melting_second_derivative.size > 0:
+            boiling_point = post_melting_temperatures[np.argmax(post_melting_second_derivative)]
+        else:
+            boiling_point = None
+
     return melting_point, boiling_point
+
 
 
 
@@ -366,7 +383,6 @@ def plot_potential_energy_vs_temperature(temperatures, potential_energies, melti
 
 
 def generate_pdf_report(melting_point, boiling_point, a_opt, temperatures, potential_energies, runtime, best_algorithm_name, best_time_step, reason):
-    """Generate a PDF report."""
     script_base_name = os.path.splitext(os.path.basename(__file__))[0]
     filename = os.path.join(script_dir, f"{script_base_name}.pdf")
     plot_filename = os.path.join(script_dir, f"{script_base_name}.png")
@@ -376,8 +392,10 @@ def generate_pdf_report(melting_point, boiling_point, a_opt, temperatures, poten
 
     c.drawString(50, height - 50, "Molecular Dynamics Simulation Report")
     c.drawString(50, height - 70, f"Optimized Lattice Parameter: {a_opt:.4e} m")
-    c.drawString(50, height - 90, f"Melting Point: {melting_point} K")
-    c.drawString(50, height - 110, f"Boiling Point: {boiling_point} K")
+    if melting_point is not None:
+        c.drawString(50, height - 90, f"Melting Point: {melting_point} K")
+    if boiling_point is not None:
+        c.drawString(50, height - 110, f"Boiling Point: {boiling_point} K")
     c.drawString(50, height - 130, f"Total Runtime: {runtime:.2f} seconds")
     c.drawString(50, height - 150, f"Best Verlet Algorithm: {best_algorithm_name}")
     c.drawString(50, height - 170, f"Best Time Step: {best_time_step:.2e} s")
@@ -385,30 +403,31 @@ def generate_pdf_report(melting_point, boiling_point, a_opt, temperatures, poten
     reason_text = f"Reason: {reason}"
     max_chars_per_line = 78
     wrapped_reason = "\n".join([reason_text[i:i + max_chars_per_line] for i in range(0, len(reason_text), max_chars_per_line)])
-    text_lines = wrapped_reason.split('\n')
-    for i, line in enumerate(text_lines):
+    for i, line in enumerate(wrapped_reason.split('\n')):
         c.drawString(50, height - 190 - i * 20, line)
 
-    
     plt.figure(figsize=(10, 6))
     plt.plot(temperatures, potential_energies, marker='o', linestyle='-', label='Average Potential Energy per Atom (MD Simulation)')
     plt.xlabel('Temperature (K)')
     plt.ylabel('Average Potential Energy per Atom (J)')
     plt.title('Average Potential Energy per Atom vs Temperature for Argon')
-    plt.axvline(melting_point, color='r', linestyle='--', label=f'Melting Point: {melting_point} K')
-    plt.axvline(boiling_point, color='g', linestyle='--', label=f'Boiling Point: {boiling_point} K')
+    if melting_point is not None:
+        plt.axvline(melting_point, color='r', linestyle='--', label=f'Melting Point: {melting_point} K')
+    if boiling_point is not None:
+        plt.axvline(boiling_point, color='g', linestyle='--', label=f'Boiling Point: {boiling_point} K')
     plt.legend()
     plt.grid(True)
-    plt.savefig(plot_filename)  # Save the plot
+    plt.savefig(plot_filename)
     plt.close()
 
-    
     try:
         c.drawImage(plot_filename, 50, 200, width=500, height=300)
     except FileNotFoundError:
         logging.error(f"File {plot_filename} not found. Skipping image in the PDF report.")
 
     c.save()
+
+
 
 def main():
     """Main function to run the MD simulation."""
@@ -419,7 +438,7 @@ def main():
     logging.info(f"Optimized lattice parameter: {a_opt}")
 
     temperatures = np.arange(5, 205, 5)
-    preliminary_temperatures = np.arange(5, 205, 25)
+    preliminary_temperatures = np.arange(5, 205, 15)
 
     time_steps = [
         1e-15, 5e-16, 1e-16, 5e-15
@@ -472,7 +491,7 @@ def main():
     print(f"Best sampling steps: {best_sampling_steps}")
     logging.info(f"Best sampling steps: {best_sampling_steps}")
 
-    with Pool(16) as pool:
+    with Pool(8) as pool:
         results = pool.starmap(run_md_for_temperature, [(T, seed, best_verlet_algorithm, best_time_step, best_sampling_steps) for T, seed in zip(temperatures, seeds)])
 
     dts, potential_energies, energy_drifts = zip(*results)
