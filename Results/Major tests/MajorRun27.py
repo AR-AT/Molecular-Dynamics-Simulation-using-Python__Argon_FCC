@@ -85,7 +85,7 @@ def compute_forces(positions, box_length):
 
 @njit
 def velocity_verlet_adaptive(positions,
-            velocities, forces, dt, box_length, max_force_threshold=1e-10):
+            velocities, forces, dt, box_length, max_force_threshold=1e-12):
     """Velocity-Verlet integration with adaptive time step."""
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
@@ -100,7 +100,7 @@ def velocity_verlet_adaptive(positions,
 
 @njit
 def standard_verlet_adaptive(positions,
-    velocities, forces, dt, box_length, max_force_threshold=1e-10):
+    velocities, forces, dt, box_length, max_force_threshold=1e-12):
     """Standard Verlet integration with adaptive time step."""
     new_positions = positions + velocities * dt + 0.5 * forces * dt**2 / MASS
     new_positions = apply_pbc(new_positions, box_length)
@@ -115,7 +115,7 @@ def standard_verlet_adaptive(positions,
 
 @njit
 def leapfrog_verlet_adaptive(positions,
-    velocities, forces, dt, box_length, max_force_threshold=1e-10):
+    velocities, forces, dt, box_length, max_force_threshold=1e-12):
     """Leapfrog Verlet integration with adaptive time step."""
     half_dt = 0.5 * dt
     velocities_half = velocities + forces * half_dt / MASS
@@ -134,9 +134,9 @@ def leapfrog_verlet_adaptive(positions,
 
 
 def adaptive_equilibration(positions, velocities, forces, dt, box_length,
-                           verlet_algorithm, initial_equilibration_window=500,
-                           initial_threshold=1e-21, min_threshold=1e-23,
-                           max_threshold=5e-20, max_steps=10000):
+                           verlet_algorithm, initial_equilibration_window=2000,
+                           initial_threshold=5e-21, min_threshold=1e-23,
+                           max_threshold=5e-20, max_steps=20000):
     """Perform adaptive equilibration with dynamic threshold and window adjustment."""
     equilibration_steps = 0
     window_size = initial_equilibration_window
@@ -267,7 +267,7 @@ def optimize_lattice_parameter():
 def test_time_steps(T, seed, verlet_algorithm,
                     time_steps, sampling_steps=60000):
     """Test different time steps."""
-    with Pool(6) as pool:
+    with Pool(16) as pool:
         args = [(T, seed, verlet_algorithm,
                  dt, sampling_steps) for dt in time_steps]
         results = pool.starmap(run_md_for_temperature, args)
@@ -494,7 +494,7 @@ def main():
     logging.info(f"Optimized lattice parameter: {a_opt}")
 
     temperatures = np.arange(5, 205, 5)
-    preliminary_temperatures = np.arange(5, 205, 20)
+    preliminary_temperatures = np.arange(5, 205, 15)
 
     time_steps = [
         1e-15, 5e-16, 1e-16, 5e-15
@@ -514,7 +514,7 @@ def main():
         "Leapfrog Verlet (Adaptive)"
     ]
 
-    preliminary_steps = 100
+    preliminary_steps = 4000
     potential_energies_per_algorithm, energy_drifts_per_algorithm, best_time_steps = run_preliminary_steps_parallel(
         preliminary_temperatures,
         preliminary_seeds,
@@ -536,8 +536,9 @@ def main():
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    sampling_step_range = [10000]
-        # 20000, 40000, 60000, 80000]
+    sampling_step_range = [ 20000, 40000, 60000, 80000]
+    
+    
     sampling_results = find_best_sampling_steps(temperatures[0], seeds[0], best_verlet_algorithm, best_time_step, sampling_step_range)
 
     for sampling_steps, potential_energy, energy_drift in sampling_results:
@@ -548,7 +549,7 @@ def main():
     print(f"Best sampling steps: {best_sampling_steps}")
     logging.info(f"Best sampling steps: {best_sampling_steps}")
 
-    with Pool(6) as pool:
+    with Pool(16) as pool:
         results = pool.starmap(run_md_for_temperature, [(T, seed, best_verlet_algorithm, best_time_step, best_sampling_steps) for T, seed in zip(temperatures, seeds)])
 
     dts, potential_energies, energy_drifts = zip(*results)
