@@ -195,7 +195,7 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
         positions = create_fcc_lattice(a, n)
         box_length = n * a  # Length of the simulation box
         N = len(positions)
-        
+
         velocities = np.random.randn(N, 3) * np.sqrt(K_B * 5 / MASS)
         forces, _ = compute_forces(positions, box_length)
 
@@ -220,7 +220,7 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
             count = 0
             total_energy_drift = 0
             initial_total_energy = None
-        
+
             for step in range(sampling_steps):
                 positions, velocities, forces, dt = verlet_algorithm(
                     positions, velocities, forces, dt, box_length
@@ -229,19 +229,19 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
                 _, potential_energy_step = compute_forces(positions, box_length)
                 total_energy = kinetic_energy + potential_energy_step
                 potential_energy += potential_energy_step
-        
+
                 if step == 0:
                     initial_total_energy = total_energy
-        
+
                 total_energy_drift += abs(total_energy - initial_total_energy)
                 count += 1
                 pbar.update(1)
                 if step % 1000 == 0:
                     logging.info(f"Step {step}: Kinetic Energy = {kinetic_energy:.5e}, Potential Energy = {potential_energy_step:.5e}, Total Energy = {total_energy:.5e}")
-            
+
             average_potential_energy = potential_energy / count / N  
             energy_drift = total_energy_drift / count
-        
+
         logging.info(f"Run completed for T={T}, seed={seed}, dt={dt}")
         logging.info(f"Average potential energy: {average_potential_energy}, Energy drift: {energy_drift}")
 
@@ -249,6 +249,7 @@ def run_md_for_temperature(T, seed, verlet_algorithm, dt, sampling_steps=60000):
     except Exception as e:
         logging.error(f"Error in run_md_for_temperature: {e}")
         return None, None, None
+
 
 
 
@@ -338,7 +339,7 @@ def run_preliminary_steps_parallel(temperatures, seeds, verlet_algorithms, algor
         potential_energies_per_algorithm.append(np.mean(potential_energies))
         energy_drifts_per_algorithm.append(np.mean(energy_drifts))
         best_time_steps.append(best_time_step)
-    
+
     # Filter out None values from the results
     potential_energies_per_algorithm = [pe for pe in potential_energies_per_algorithm if pe is not None]
     energy_drifts_per_algorithm = [ed for ed in energy_drifts_per_algorithm if ed is not None]
