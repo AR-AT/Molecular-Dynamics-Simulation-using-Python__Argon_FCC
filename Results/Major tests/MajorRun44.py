@@ -134,9 +134,9 @@ def leapfrog_verlet_adaptive(positions,
 
 
 def adaptive_equilibration(positions, velocities, forces, dt, box_length,
-                           verlet_algorithm, initial_equilibration_window=10,
+                           verlet_algorithm, initial_equilibration_window=500,
                            initial_threshold=5e-25, min_threshold=5e-27,
-                           max_threshold=5e-21, max_steps=100):
+                           max_threshold=5e-21, max_steps=100000):
     """Perform adaptive equilibration with dynamic threshold and window adjustment."""
     equilibration_steps = 0
     window_size = initial_equilibration_window
@@ -162,7 +162,7 @@ def adaptive_equilibration(positions, velocities, forces, dt, box_length,
 
                 # Dynamically adjust the threshold based on the standard deviation
                 if std_potential_energy > threshold:
-                    threshold = min(threshold * 1.5, max_threshold)
+                    threshold = min(threshold * 1.09, max_threshold)
                     new_window_size = min(int(window_size * 1.00), len(recent_potential_energies) * 1.0)
                     if new_window_size > window_size:
                         recent_potential_energies = np.resize(recent_potential_energies, new_window_size)
@@ -432,9 +432,11 @@ def main():
     logging.info(f"Optimized lattice parameter: {a_opt}")
 
     temperatures = np.arange(5, 205, 5)
-    preliminary_temperatures = np.arange(5, 205, 50)
+    preliminary_temperatures = np.arange(5, 205, 40)
 
-    time_steps = [1e-14]
+    time_steps = [
+        1e-15, 5e-15, 1e-14
+    ]
 
     seeds = np.random.randint(0, 10000, len(temperatures))
     preliminary_seeds = np.random.randint(0, 10000, len(preliminary_temperatures))
@@ -450,7 +452,7 @@ def main():
         "Leapfrog Verlet (Adaptive)"
     ]
 
-    preliminary_steps = 80
+    preliminary_steps = 8000
     potential_energies_per_algorithm, energy_drifts_per_algorithm, best_time_steps = run_preliminary_steps_parallel(
         preliminary_temperatures,
         preliminary_seeds,
@@ -472,7 +474,7 @@ def main():
     print(f"Best Verlet algorithm: {best_algorithm_name}")
     print(f"Best time step: {best_time_step}")
 
-    sampling_step_range = [200, 300, 500, 600]
+    sampling_step_range = [20000, 40000, 60000, 80000]
     
     # Collect results for all preliminary temperatures
     sampling_results = []
